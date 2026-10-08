@@ -69,8 +69,9 @@ void ed_select_line(Editor *ed);
 void ed_clear_selection(Editor *ed);
 /* Ordered selection bounds; returns 0 if there is no (non-empty) selection. */
 int ed_sel_range(const Editor *ed, long *sy, size_t *sx, long *ey, size_t *ex);
+int ed_has_selection(const Editor *ed);
 void ed_scroll(Editor *ed, long lines);
-void ed_scroll_to_cursor(Editor *ed, unsigned long now);
+void ed_scroll_to_cursor(Editor *ed);
 
 /* `now` is a millisecond clock used to group typing into undo steps. */
 void ed_type(Editor *ed, const char *s, size_t n, unsigned long now);

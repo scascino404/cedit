@@ -3,6 +3,7 @@
  */
 #define _XOPEN_SOURCE 700
 #include "buffer.h"
+#include "util.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -20,26 +21,16 @@
 #define LEAF_MIN    1024        /* a leaf below this is merged with its neighbor */
 #define FIRST_LOAD  (1024 * 1024)
 
-static void *xmalloc(size_t n)
-{
-    void *p = malloc(n ? n : 1);
-    if (!p) {
-        fputs("cedit: out of memory\n", stderr);
-        abort();
-    }
-    return p;
-}
-
-static void set_err(char *err, size_t errlen, const char *msg)
-{
-    size_t n = strlen(msg);
-    if (!errlen)
-        return;
-    if (n >= errlen)
-        n = errlen - 1;
-    memcpy(err, msg, n);
-    err[n] = 0;
-}
+struct Node {
+    Node *parent;
+    int is_leaf;
+    int nkids;          /* inner nodes only */
+    long newlines;      /* aggregated over the subtree */
+    size_t bytes;       /* aggregated over the subtree */
+    char *text;         /* leaf only */
+    size_t cap;         /* leaf only: 0 => text is borrowed (file mapping) */
+    Node **kid;         /* inner only: FANOUT slots */
+};
 
 /* Counts '\n' bytes. The inner loop over 128-byte blocks with a byte-wide
  * accumulator is shaped so that both gcc and clang vectorize it (about
@@ -78,12 +69,21 @@ static Node *leaf_new(char *text, size_t len, size_t cap, long nl)
     return n;
 }
 
+/* Gives an empty leaf an owned copy of s. */
+static void leaf_fill(Node *l, const char *s, size_t len)
+{
+    l->cap = len + len / 4 + 64;
+    l->text = (char *)xmalloc(l->cap);
+    memcpy(l->text, s, len);
+    l->bytes = len;
+    l->newlines = count_nl(s, len);
+}
+
 static Node *leaf_copy(const char *s, size_t len)
 {
-    size_t cap = len + len / 4 + 64;
-    char *t = (char *)xmalloc(cap);
-    memcpy(t, s, len);
-    return leaf_new(t, len, cap, count_nl(s, len));
+    Node *n = leaf_new(NULL, 0, 0, 0);
+    leaf_fill(n, s, len);
+    return n;
 }
 
 static Node *inner_new(void)
@@ -298,9 +298,11 @@ static Node *leaf_prev(Node *n)
     return NULL;
 }
 
-/* Leaf where line ln starts; line0 and off0 receive the first line and the
- * byte offset of that leaf. */
-static Node *find_leaf_line(Buffer *b, long ln, long *line0, size_t *off0)
+/* Leaf where line ln starts or, when ln < 0, the leaf containing byte off
+ * (the last leaf for off == size). line0 and off0 receive the first line and
+ * the byte offset of that leaf. */
+static Node *find_leaf(Buffer *b, long ln, size_t off, long *line0,
+                       size_t *off0)
 {
     Node *n = b->root;
     long l = 0;
@@ -310,30 +312,7 @@ static Node *find_leaf_line(Buffer *b, long ln, long *line0, size_t *off0)
         int i;
         for (i = 0; i < n->nkids - 1; i++) {
             Node *k = n->kid[i];
-            if (ln < l + k->newlines)
-                break;
-            l += k->newlines;
-            o += k->bytes;
-        }
-        n = n->kid[i];
-    }
-    *line0 = l;
-    *off0 = o;
-    return n;
-}
-
-/* Leaf containing byte off (the last leaf for off == size). */
-static Node *find_leaf_off(Buffer *b, size_t off, long *line0, size_t *off0)
-{
-    Node *n = b->root;
-    long l = 0;
-    size_t o = 0;
-
-    while (!n->is_leaf) {
-        int i;
-        for (i = 0; i < n->nkids - 1; i++) {
-            Node *k = n->kid[i];
-            if (off < o + k->bytes)
+            if (ln >= 0 ? ln < l + k->newlines : off < o + k->bytes)
                 break;
             l += k->newlines;
             o += k->bytes;
@@ -382,21 +361,14 @@ static size_t chunk_end(const char *d, size_t pos, size_t len)
  * large. */
 static void replace_leaf(Buffer *b, Node *leaf, const char *d, size_t len)
 {
-    size_t pos = 0, cut;
+    size_t pos, cut;
     Node *prev = leaf;
     long old_nl = leaf->newlines;
     size_t old_bytes = leaf->bytes;
-    Node *tmp;
 
     cut = chunk_end(d, 0, len);
-    tmp = leaf_copy(d, cut);
-    if (leaf->cap)
-        free(leaf->text);
-    leaf->text = tmp->text;
-    leaf->cap = tmp->cap;
-    leaf->bytes = tmp->bytes;
-    leaf->newlines = tmp->newlines;
-    free(tmp);
+    leaf_set_empty(leaf);
+    leaf_fill(leaf, d, cut);
     add_up(leaf->parent, leaf->newlines - old_nl,
            (long)(leaf->bytes - old_bytes));
     pos = cut;
@@ -549,16 +521,16 @@ int buf_open(Buffer *b, const char *path, int *is_new, char *err,
             *is_new = 1;
             return 0;
         }
-        set_err(err, errlen, strerror(errno));
+        str_copy(err, errlen, strerror(errno));
         return -1;
     }
     if (fstat(fd, &st) < 0) {
-        set_err(err, errlen, strerror(errno));
+        str_copy(err, errlen, strerror(errno));
         close(fd);
         return -1;
     }
     if (S_ISDIR(st.st_mode)) {
-        set_err(err, errlen, "Is a directory");
+        str_copy(err, errlen, "Is a directory");
         close(fd);
         return -1;
     }
@@ -590,7 +562,7 @@ int buf_open(Buffer *b, const char *path, int *is_new, char *err,
             if (r < 0 && errno == EINTR)
                 continue;
             if (r < 0) {
-                set_err(err, errlen, strerror(errno));
+                str_copy(err, errlen, strerror(errno));
                 free(d);
                 close(fd);
                 return -1;
@@ -652,7 +624,7 @@ static const char *line_raw(Buffer *b, long ln, size_t *len, int *has_nl,
         l0 = b->c_line0;
         o0 = b->c_off0;
     } else {
-        leaf = find_leaf_line(b, ln, &l0, &o0);
+        leaf = find_leaf(b, ln, 0, &l0, &o0);
         b->c_gen = b->gen;
         b->c_leaf = leaf;
         b->c_line0 = l0;
@@ -711,7 +683,7 @@ void buf_offset_to_pos(Buffer *b, size_t off, long *ln, size_t *col)
 
     if (off > b->root->bytes)
         off = b->root->bytes;
-    leaf = find_leaf_off(b, off, &l0, &o0);
+    leaf = find_leaf(b, -1, off, &l0, &o0);
     rel = off - o0;
     for (i = 0; i < rel; i++) {
         if (leaf->text[i] == '\n') {
@@ -734,7 +706,7 @@ void buf_insert(Buffer *b, size_t off, const char *s, size_t n)
     b->gen++;
     if (off > b->root->bytes)
         off = b->root->bytes;
-    leaf = find_leaf_off(b, off, &l0, &o0);
+    leaf = find_leaf(b, -1, off, &l0, &o0);
     rel = off - o0;
     if (leaf->bytes + n <= LEAF_MAX) {
         leaf_own(leaf, n);
@@ -768,8 +740,8 @@ void buf_delete(Buffer *b, size_t off, size_t n)
     if (n > b->root->bytes - off)
         n = b->root->bytes - off;
     b->gen++;
-    a = find_leaf_off(b, off, &l0, &oa);
-    z = find_leaf_off(b, off + n - 1, &l0, &oz);
+    a = find_leaf(b, -1, off, &l0, &oa);
+    z = find_leaf(b, -1, off + n - 1, &l0, &oz);
     rel = off - oa;
 
     if (a == z) {
@@ -818,7 +790,7 @@ void buf_copy(Buffer *b, size_t off, size_t n, char *dst)
 
     if (!n)
         return;
-    leaf = find_leaf_off(b, off, &l0, &o0);
+    leaf = find_leaf(b, -1, off, &l0, &o0);
     rel = off - o0;
     while (n && leaf) {
         size_t k = leaf->bytes - rel;
@@ -832,46 +804,32 @@ void buf_copy(Buffer *b, size_t off, size_t n, char *dst)
     }
 }
 
-static int lower(int c)
-{
-    return c >= 'A' && c <= 'Z' ? c + 32 : c;
-}
-
-static int match_at(const char *s, const char *pat, size_t plen, int icase)
-{
-    size_t i;
-    if (!icase)
-        return memcmp(s, pat, plen) == 0;
-    for (i = 0; i < plen; i++)
-        if (lower((unsigned char)s[i]) != lower((unsigned char)pat[i]))
-            return 0;
-    return 1;
-}
-
 /* First match in s[0..n), or -1. */
 static long search_fwd(const char *s, size_t n, const char *pat, size_t plen,
                        int icase)
 {
     size_t i = 0;
     int c0 = (unsigned char)pat[0];
+    int letter = (c0 | 32) >= 'a' && (c0 | 32) <= 'z';
 
     if (n < plen)
         return -1;
-    if (!icase || (lower(c0) == c0 && !(c0 >= 'a' && c0 <= 'z'))) {
+    if (!icase || !letter) {
         while (i + plen <= n) {
             const char *p = (const char *)memchr(s + i, c0, n - plen + 1 - i);
             if (!p)
                 return -1;
             i = (size_t)(p - s);
-            if (match_at(s + i, pat, plen, icase))
+            if (mem_match(s + i, pat, plen, icase))
                 return (long)i;
             i++;
         }
         return -1;
     }
-    c0 = lower(c0);
+    c0 = ascii_lower(c0);
     for (; i + plen <= n; i++)
-        if (lower((unsigned char)s[i]) == c0 && match_at(s + i, pat, plen, 1))
+        if (ascii_lower((unsigned char)s[i]) == c0 &&
+            mem_match(s + i, pat, plen, 1))
             return (long)i;
     return -1;
 }
@@ -884,7 +842,7 @@ static long search_bwd(const char *s, size_t n, const char *pat, size_t plen,
     if (n < plen)
         return -1;
     for (i = n - plen + 1; i > 0; i--)
-        if (match_at(s + i - 1, pat, plen, icase))
+        if (mem_match(s + i - 1, pat, plen, icase))
             return (long)(i - 1);
     return -1;
 }
@@ -902,7 +860,7 @@ size_t buf_find(Buffer *b, size_t from, const char *pat, size_t plen,
     buf_load_all(b);
     if (from > b->root->bytes)
         from = b->root->bytes;
-    leaf = find_leaf_off(b, from, &l0, &o0);
+    leaf = find_leaf(b, -1, from, &l0, &o0);
     rel = from - o0;
     if (!backward) {
         while (leaf) {
@@ -960,10 +918,8 @@ int buf_save(Buffer *b, const char *path, char *err, size_t errlen)
 
     buf_load_all(b);
     target = realpath(path, NULL);
-    if (!target) {
-        target = (char *)xmalloc(strlen(path) + 1);
-        strcpy(target, path);
-    }
+    if (!target)
+        target = xstrdup(path);
     have_st = stat(target, &st) == 0;
 
     /* 1. temp file in the same directory, then rename over the target */
@@ -989,7 +945,7 @@ int buf_save(Buffer *b, const char *path, char *err, size_t errlen)
             free(target);
             return 0;
         }
-        set_err(err, errlen, strerror(errno));
+        str_copy(err, errlen, strerror(errno));
         close(fd);
         unlink(tmp);
         free(tmp);
@@ -1008,7 +964,7 @@ int buf_save(Buffer *b, const char *path, char *err, size_t errlen)
     }
     fd = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     if (fd < 0 || write_all(fd, b) < 0 || close(fd) < 0) {
-        set_err(err, errlen, strerror(errno));
+        str_copy(err, errlen, strerror(errno));
         if (fd >= 0)
             close(fd);
         free(target);

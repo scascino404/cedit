@@ -46,10 +46,6 @@ void undo_set_cursor(Undo *u, size_t cursor);
 int undo_undo(Undo *u, Buffer *b, size_t *cursor);
 int undo_redo(Undo *u, Buffer *b, size_t *cursor);
 
-/* Is the last op of the open step an insert / delete ending at off? Used by
- * the editor to decide whether typing continues the current step. */
-int undo_can_extend(const Undo *u, int ins, size_t off);
-
 void undo_mark_saved(Undo *u);
 int undo_modified(const Undo *u);
 

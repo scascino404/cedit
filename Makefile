@@ -15,8 +15,8 @@ PREFIX   = /usr/local
 BUILD = build
 OBJ_DIR = $(BUILD)/obj
 
-CORE = editor buffer undo utf8
-APP  = main ui screen font font8x8 font8x16 cursor config $(CORE)
+CORE = editor buffer undo utf8 util
+APP  = main ui menu dialog theme screen font font8x8 font8x16 cursor config $(CORE)
 OBJ  = $(APP:%=$(OBJ_DIR)/%.o)
 LIB  = $(filter-out $(OBJ_DIR)/main.o,$(OBJ))
 
@@ -35,7 +35,8 @@ $(OBJ_DIR)/tests:
 	mkdir -p $@
 
 # tests
-$(BUILD)/test_buffer: $(OBJ_DIR)/tests/test_buffer.o $(OBJ_DIR)/buffer.o $(OBJ_DIR)/undo.o
+$(BUILD)/test_buffer: $(OBJ_DIR)/tests/test_buffer.o $(OBJ_DIR)/buffer.o $(OBJ_DIR)/undo.o \
+                      $(OBJ_DIR)/util.o
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(BUILD)/test_editor: $(OBJ_DIR)/tests/test_editor.o $(CORE:%=$(OBJ_DIR)/%.o)

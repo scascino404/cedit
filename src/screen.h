@@ -64,15 +64,25 @@ void screen_quit(Screen *s);
 void screen_layout(Screen *s);
 void screen_set_size(Screen *s, int size);
 
-void screen_clear(Screen *s, int fg, int bg);
+/* Drawing. Cells outside the grid are ignored. */
 void screen_put(Screen *s, int x, int y, unsigned long ch, int fg, int bg);
 /* Writes UTF-8 text, at most maxw cells; returns the cells written. */
 int screen_puts(Screen *s, int x, int y, const char *str, int fg, int bg, int maxw);
 void screen_fill(Screen *s, int x, int y, int w, int h, unsigned long ch,
                  int fg, int bg);
+/* A single or double line box. */
+void screen_frame(Screen *s, int x, int y, int w, int h, int dbl, int fg, int bg);
+/* Darkens the cells under a drop shadow. */
 void screen_shadow(Screen *s, int x, int y, int w, int h);
 void screen_cursor(Screen *s, int x, int y, int shape);
-Cell *screen_cell(Screen *s, int x, int y);
+
+/* Labels mark their hotkey letter with '&', as in "&Open". screen_label
+ * draws one with the hotkey in color hot and returns its width. */
+int screen_label(Screen *s, int x, int y, const char *label, int fg, int hot,
+                 int bg);
+int label_width(const char *label);
+/* The lowercase hotkey letter of a label, or 0. */
+int label_hotkey(const char *label);
 
 /* Moves the self-drawn pointer (window coordinates) or hides it. */
 void screen_pointer(Screen *s, int wx, int wy, int visible);

@@ -11,17 +11,7 @@
 
 #include <stddef.h>
 
-typedef struct Node Node;
-struct Node {
-    Node *parent;
-    int is_leaf;
-    int nkids;          /* inner nodes only */
-    long newlines;      /* aggregated over the subtree */
-    size_t bytes;       /* aggregated over the subtree */
-    char *text;         /* leaf only */
-    size_t cap;         /* leaf only: 0 => text is borrowed (file mapping) */
-    Node **kid;         /* inner only: FANOUT slots */
-};
+typedef struct Node Node;     /* tree node, private to buffer.c */
 
 typedef struct Buffer {
     Node *root;

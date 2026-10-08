@@ -1,55 +1,31 @@
 /*
- * ui.h - menus, dialogs, drawing and input handling.
+ * ui.h - the application: commands, dialogs, drawing and input handling.
  */
 #ifndef CEDIT_UI_H
 #define CEDIT_UI_H
 
+#include "dialog.h"
 #include "editor.h"
+#include "menu.h"
 #include "screen.h"
-#include "cursor.h"
-#include "config.h"
-
-#define FIELD_MAX 1024
-
-typedef struct Widget {
-    int kind, id;
-    int x, y, w;            /* relative to the dialog */
-    char label[128];
-    char text[FIELD_MAX];
-    size_t len, cur;
-    int checked;
-} Widget;
-
-typedef struct Dialog {
-    int kind;
-    int x, y, w, h;
-    int at_bottom;
-    char title[64];
-    Widget wd[24];
-    int n, focus, def_id;
-    /* file dialog */
-    char dir[4096];
-    char **items;
-    int nitems, sel, scroll;
-    int list_x, list_y, list_w, list_h;
-    char msg[256];
-    char overwrite[4096];
-} Dialog;
+#include "theme.h"
 
 typedef struct App {
     Screen scr;
     Editor ed;
+    const Theme *theme;
     int running;
 
-    int menu;               /* open menu index or -1 */
-    int menu_item;
-    int alt_tap;
+    MenuBar menu;
+    int alt_tap;            /* Alt pressed alone: toggles the menu on release */
 
     Dialog dlg;
+    char dir[4096];         /* directory shown by the file dialogs */
+    char overwrite[4096];   /* existing file the user agreed to replace */
     int pending;            /* action waiting for "save changes?" */
     char pending_path[4096];
 
-    char msg[256];
+    char msg[256];          /* status bar message, shown until msg_until */
     unsigned long msg_until;
 
     int blink_on;

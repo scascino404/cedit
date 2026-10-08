@@ -2,23 +2,13 @@
  * undo.c - linear undo/redo history.
  */
 #include "undo.h"
+#include "util.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define MAX_STEPS 1000                          /* Vim's 'undolevels' */
 #define MAX_MEM   ((size_t)512 * 1024 * 1024)
-
-static void *xrealloc(void *p, size_t n)
-{
-    p = realloc(p, n ? n : 1);
-    if (!p) {
-        fputs("cedit: out of memory\n", stderr);
-        abort();
-    }
-    return p;
-}
 
 static void step_free(Undo *u, UndoStep *s)
 {
@@ -151,7 +141,7 @@ void undo_delete(Undo *u, Buffer *b, size_t off, size_t n, size_t cursor)
         n = buf_size(b) - off;
     if (!n)
         return;
-    tmp = (char *)xrealloc(NULL, n);
+    tmp = (char *)xmalloc(n);
     buf_copy(b, off, n, tmp);
     record(u, 0, off, tmp, n, cursor);
     free(tmp);
@@ -202,22 +192,6 @@ int undo_redo(Undo *u, Buffer *b, size_t *cursor)
     }
     *cursor = s->cur_after;
     return 1;
-}
-
-int undo_can_extend(const Undo *u, int ins, size_t off)
-{
-    const UndoStep *s;
-    const UndoOp *op;
-
-    if (!u->open || u->pos == 0)
-        return 0;
-    s = &u->steps[u->pos - 1];
-    if (!s->nops)
-        return 0;
-    op = &s->ops[s->nops - 1];
-    if (op->ins != ins)
-        return 0;
-    return ins ? off == op->off + op->len : off == op->off;
 }
 
 void undo_mark_saved(Undo *u)

@@ -107,12 +107,27 @@ Settings are changed from the menus and remembered across sessions in
 | `src/buffer.c` | Text storage: a B-tree of line-aligned leaves in the style of Vim's memline, memory-mapped copy-on-write loading, incremental indexing, atomic save |
 | `src/undo.c` | Linear undo/redo of byte-level insert/delete ops, grouped into steps |
 | `src/editor.c` | Cursor, selection, edit commands, search/replace. No SDL code |
-| `src/screen.c` | A text-mode cell grid. Only changed cells are rasterized, and the image is scaled up by integer factors |
-| `src/ui.c` | Menu bar, editor window, dialogs, input handling |
+| `src/screen.c` | A text-mode cell grid with box and label drawing. Only changed cells are rasterized, and the image is scaled up by integer factors |
+| `src/ui.c` | The application: commands, the concrete dialogs, the editor window, input handling |
+| `src/menu.c` | The menu tables (every command with its label and shortcut), menu drawing and navigation |
+| `src/dialog.c` | Generic dialog boxes: labels, input fields, checkboxes, buttons and a list box |
+| `src/theme.c` | The light and dark color themes |
 | `src/font8x8.c`, `src/font8x16.c` | The two hand-drawn fonts, as ASCII art |
 | `src/font.c` | Builds the glyph tables: box drawing from stroke rules, accented Latin-1 letters by composition |
 | `src/cursor.c` | Hand-drawn mouse pointers (the TempleOS arrow, I-beam, hourglass) and text cursor shapes |
-| `src/config.c` | Loads and saves the settings file |
+| `src/config.c` | Loads and saves the settings file, driven by one table of keys |
+| `src/util.c` | Allocation and string helpers shared by all modules |
+
+### Extending
+
+- **A command:** add a `CMD_` value in `src/menu.h` and a row in a menu
+  table in `src/menu.c`, then handle it in `command()` in `src/ui.c` (and in
+  `cmd_enabled()` / `cmd_checked()` if it can be disabled or toggled). Its
+  keyboard shortcut goes in `editor_key()`.
+- **A dialog:** build it in `src/ui.c` from the widgets in `src/dialog.h`,
+  and act on its buttons in `dialog_button()`.
+- **A setting:** add a field to `Config` in `src/config.h`, with a default
+  and a row in the key table in `src/config.c`.
 
 ### Text sizes
 
@@ -146,7 +161,7 @@ don't apply inside the window.
 Light mode is TempleOS's blue ink on white paper. Dark mode is light gray on
 black with the same blue bars and yellow block cursor. Both use the 16-color
 VGA palette, with each UI element mapped to a palette color through a theme
-table in `src/ui.c`.
+table in `src/theme.c`.
 
 ### Review tools
 

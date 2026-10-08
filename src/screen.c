@@ -2,8 +2,8 @@
  * screen.c - character grid, dirty-cell rasterizer and SDL presentation.
  */
 #include "screen.h"
-#include "cursor.h"
 #include "utf8.h"
+#include "util.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -32,9 +32,6 @@ int screen_init(Screen *s, int size)
 
     memset(s, 0, sizeof *s);
     s->size = size;
-    s->cur_bg = YELLOW;
-    s->cur_ink = BLUE;
-    s->cur_box = RED;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     /* about 80x25 cells of the chosen size, within 90% of the display */
     w = 80 * sizes[size].font->w * sizes[size].mult;
@@ -156,7 +153,7 @@ void screen_set_size(Screen *s, int size)
     screen_layout(s);
 }
 
-Cell *screen_cell(Screen *s, int x, int y)
+static Cell *screen_cell(Screen *s, int x, int y)
 {
     if (x < 0 || y < 0 || x >= s->cols || y >= s->rows)
         return NULL;
@@ -172,11 +169,6 @@ void screen_put(Screen *s, int x, int y, unsigned long ch, int fg, int bg)
     c->fg = (unsigned char)fg;
     c->bg = (unsigned char)bg;
     c->cur = TCUR_NONE;
-}
-
-void screen_clear(Screen *s, int fg, int bg)
-{
-    screen_fill(s, 0, 0, s->cols, s->rows, ' ', fg, bg);
 }
 
 void screen_fill(Screen *s, int x, int y, int w, int h, unsigned long ch,
@@ -202,6 +194,24 @@ int screen_puts(Screen *s, int x, int y, const char *str, int fg, int bg,
     return w;
 }
 
+void screen_frame(Screen *s, int x, int y, int w, int h, int dbl, int fg, int bg)
+{
+    int i;
+    unsigned long hz = dbl ? 0x2550 : 0x2500, vt = dbl ? 0x2551 : 0x2502;
+    screen_put(s, x, y, dbl ? 0x2554 : 0x250C, fg, bg);
+    screen_put(s, x + w - 1, y, dbl ? 0x2557 : 0x2510, fg, bg);
+    screen_put(s, x, y + h - 1, dbl ? 0x255A : 0x2514, fg, bg);
+    screen_put(s, x + w - 1, y + h - 1, dbl ? 0x255D : 0x2518, fg, bg);
+    for (i = 1; i < w - 1; i++) {
+        screen_put(s, x + i, y, hz, fg, bg);
+        screen_put(s, x + i, y + h - 1, hz, fg, bg);
+    }
+    for (i = 1; i < h - 1; i++) {
+        screen_put(s, x, y + i, vt, fg, bg);
+        screen_put(s, x + w - 1, y + i, vt, fg, bg);
+    }
+}
+
 void screen_shadow(Screen *s, int x, int y, int w, int h)
 {
     int i, j;
@@ -220,6 +230,39 @@ void screen_cursor(Screen *s, int x, int y, int shape)
     Cell *c = screen_cell(s, x, y);
     if (c)
         c->cur = (unsigned char)shape;
+}
+
+int screen_label(Screen *s, int x, int y, const char *label, int fg, int hot,
+                 int bg)
+{
+    size_t n = strlen(label), i = 0;
+    int w = 0, next_hot = 0;
+    while (i < n) {
+        unsigned long cp;
+        i += utf8_decode(label + i, n - i, &cp);
+        if (cp == '&') {
+            next_hot = 1;
+            continue;
+        }
+        screen_put(s, x + w, y, cp, next_hot ? hot : fg, bg);
+        next_hot = 0;
+        w++;
+    }
+    return w;
+}
+
+int label_width(const char *label)
+{
+    int w = utf8_width(label);
+    for (; *label; label++)
+        w -= *label == '&';
+    return w;
+}
+
+int label_hotkey(const char *label)
+{
+    const char *p = strchr(label, '&');
+    return p ? ascii_lower((unsigned char)p[1]) : 0;
 }
 
 static void raster(Screen *s, int cx, int cy, const Cell *c)
@@ -244,6 +287,20 @@ static void raster(Screen *s, int cx, int cy, const Cell *c)
             }
         }
     }
+}
+
+static void fill_rect(Screen *s, int x, int y, int w, int h, int color)
+{
+    Uint32 c = palette[color & 15];
+    SDL_Rect r;
+    if (w <= 0 || h <= 0)
+        return;
+    r.x = x;
+    r.y = y;
+    r.w = w;
+    r.h = h;
+    SDL_SetRenderDrawColor(s->ren, (Uint8)(c >> 16), (Uint8)(c >> 8), (Uint8)c, 0xFF);
+    SDL_RenderFillRect(s->ren, &r);
 }
 
 void screen_present(Screen *s)
@@ -285,31 +342,13 @@ void screen_present(Screen *s)
     dst.h = s->fb_h * s->scale;
     SDL_RenderCopy(s->ren, s->tex, NULL, &dst);
     for (y = 0; y < s->rows; y++) {
-        Uint32 col = palette[s->cells[y * s->cols + s->cols - 1].bg & 15];
-        SDL_Rect r;
-        r.x = dst.w;
-        r.y = y * s->ch * s->scale;
-        r.w = s->out_w - dst.w;
-        r.h = s->ch * s->scale;
-        if (y == s->rows - 1)
-            r.h = s->out_h - r.y;
-        SDL_SetRenderDrawColor(s->ren, (Uint8)(col >> 16), (Uint8)(col >> 8),
-                               (Uint8)col, 0xFF);
-        if (r.w > 0)
-            SDL_RenderFillRect(s->ren, &r);
+        int top = y * s->ch * s->scale;
+        int h = y == s->rows - 1 ? s->out_h - top : s->ch * s->scale;
+        fill_rect(s, dst.w, top, s->out_w - dst.w, h,
+                  s->cells[y * s->cols + s->cols - 1].bg);
     }
-    {
-        Uint32 col = palette[s->cells[(s->rows - 1) * s->cols].bg & 15];
-        SDL_Rect r;
-        r.x = 0;
-        r.y = dst.h;
-        r.w = dst.w;
-        r.h = s->out_h - dst.h;
-        SDL_SetRenderDrawColor(s->ren, (Uint8)(col >> 16), (Uint8)(col >> 8),
-                               (Uint8)col, 0xFF);
-        if (r.h > 0)
-            SDL_RenderFillRect(s->ren, &r);
-    }
+    fill_rect(s, 0, dst.h, dst.w, s->out_h - dst.h,
+              s->cells[(s->rows - 1) * s->cols].bg);
     if (s->ptr_visible && s->ptr_tex[s->ptr_kind]) {
         /* same pixel size as the font, hot spot pixel under the mouse */
         int k = s->ptr_kind;

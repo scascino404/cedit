@@ -1,14 +1,18 @@
 /*
- * ui.c - the cedit user interface: menu bar, editor window, dialogs.
+ * ui.c - the cedit application: commands, dialogs, the editor window and
+ * input handling.
  *
  * Everything is drawn into the Screen's character grid, text-mode style.
+ * The menu bar (menu.c) and the dialog boxes (dialog.c) are generic; this
+ * file gives them their content and acts on what the user picks.
  */
 #define _XOPEN_SOURCE 700
 #include "ui.h"
+#include "config.h"
 #include "utf8.h"
+#include "util.h"
 
 #include <dirent.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,143 +25,18 @@
 #define DCLICK_MS  400
 #define LOAD_SLICE ((size_t)32 * 1024 * 1024)
 
-/* Color roles, as indices into the 16-color palette. */
-typedef struct Theme {
-    unsigned char text_fg, text_bg;     /* document, menus, dialogs */
-    unsigned char sel_fg, sel_bg;       /* selection, highlighted item */
-    unsigned char frame;                /* borders and scrollbar */
-    unsigned char title_fg, title_bg;   /* window and dialog titles */
-    unsigned char bar_fg, bar_bg, bar_hot;  /* menu bar and status bar */
-    unsigned char hot, sel_hot;         /* hotkey letters */
-    unsigned char disabled, lnum, cur_lnum;
-    unsigned char special_fg, special_bg, special_sel_bg;  /* ^X controls */
-    unsigned char bad;                  /* placeholder glyphs, errors */
-    unsigned char field_fg, field_bg;
-    unsigned char focus_fg, focus_bg;   /* focused field or checkbox */
-    unsigned char dir;                  /* directories in the file list */
-    unsigned char cursor_bg, cursor_ink, cursor_box;
-} Theme;
-
-/* TempleOS: blue ink on white paper */
-static const Theme theme_light = {
-    BLUE, WHITE,                    /* text */
-    WHITE, BLUE,                    /* selection */
-    BLUE,                           /* frame */
-    WHITE, BLUE,                    /* title */
-    WHITE, BLUE, YELLOW,            /* bars */
-    RED, YELLOW,                    /* hotkeys */
-    LIGHTGRAY, DARKGRAY, BLUE,      /* disabled, line numbers */
-    WHITE, RED, MAGENTA,            /* control characters */
-    RED,                            /* bad */
-    BLUE, LIGHTCYAN,                /* field */
-    BLUE, YELLOW,                   /* focus */
-    RED,                            /* directories */
-    YELLOW, BLUE, RED               /* cursor */
-};
-
-/* Dark mode: light gray on black, same blue bars and yellow block cursor */
-static const Theme theme_dark = {
-    LIGHTGRAY, BLACK,               /* text */
-    WHITE, BLUE,                    /* selection */
-    LIGHTBLUE,                      /* frame */
-    WHITE, BLUE,                    /* title */
-    WHITE, BLUE, YELLOW,            /* bars */
-    LIGHTRED, YELLOW,               /* hotkeys */
-    DARKGRAY, DARKGRAY, WHITE,      /* disabled, line numbers */
-    WHITE, RED, MAGENTA,            /* control characters */
-    LIGHTRED,                       /* bad */
-    WHITE, BLUE,                    /* field */
-    BLACK, YELLOW,                  /* focus */
-    LIGHTCYAN,                      /* directories */
-    YELLOW, BLACK, LIGHTRED         /* cursor */
-};
-
-static const Theme *T = &theme_light;
-
-enum {
-    CMD_NONE, CMD_NEW, CMD_OPEN, CMD_SAVE, CMD_SAVEAS, CMD_EXIT,
-    CMD_UNDO, CMD_REDO, CMD_CUT, CMD_COPY, CMD_PASTE, CMD_DELETE, CMD_SELALL,
-    CMD_OVERWRITE, CMD_FIND, CMD_FINDNEXT, CMD_FINDPREV, CMD_REPLACE, CMD_GOTO,
-    CMD_SIZE_S, CMD_SIZE_N, CMD_SIZE_L, CMD_LINENUM, CMD_TAB4, CMD_TAB8,
-    CMD_DARK, CMD_AUTOINDENT, CMD_HELP, CMD_ABOUT
-};
-
+/* actions that wait for "save changes?" */
 enum { P_NONE, P_QUIT, P_NEW, P_OPEN, P_OPEN_PATH };
 
 enum {
-    DLG_NONE, DLG_OPEN, DLG_SAVEAS, DLG_FIND, DLG_REPLACE, DLG_GOTO,
+    DLG_OPEN = DLG_NONE + 1, DLG_SAVEAS, DLG_FIND, DLG_REPLACE, DLG_GOTO,
     DLG_CONFIRM, DLG_MESSAGE, DLG_HELP
 };
 
-enum { W_LABEL, W_FIELD, W_CHECK, W_BUTTON };
-
 enum {
-    ID_NONE, ID_OK, ID_CANCEL, ID_YES, ID_NO, ID_NAME, ID_FIND, ID_REPL,
-    ID_CASE, ID_FINDNEXT, ID_REPLACE, ID_REPLALL, ID_LINE, ID_DIR
+    ID_YES = ID_USER, ID_NO, ID_NAME, ID_FIND, ID_REPL, ID_CASE, ID_FINDNEXT,
+    ID_REPLACE, ID_REPLALL, ID_LINE, ID_DIR
 };
-
-typedef struct MenuItem {
-    const char *label;      /* '&' marks the hotkey; NULL = separator */
-    const char *keys;
-    int cmd;
-} MenuItem;
-
-static const MenuItem m_file[] = {
-    {"&New", "Ctrl+N", CMD_NEW},
-    {"&Open...", "Ctrl+O", CMD_OPEN},
-    {"&Save", "Ctrl+S", CMD_SAVE},
-    {"Save &As...", "Ctrl+Shift+S", CMD_SAVEAS},
-    {NULL, NULL, 0},
-    {"E&xit", "Ctrl+Q", CMD_EXIT}
-};
-static const MenuItem m_edit[] = {
-    {"&Undo", "Ctrl+Z", CMD_UNDO},
-    {"&Redo", "Ctrl+Y", CMD_REDO},
-    {NULL, NULL, 0},
-    {"Cu&t", "Ctrl+X", CMD_CUT},
-    {"&Copy", "Ctrl+C", CMD_COPY},
-    {"&Paste", "Ctrl+V", CMD_PASTE},
-    {"&Delete", "Del", CMD_DELETE},
-    {NULL, NULL, 0},
-    {"Select &All", "Ctrl+A", CMD_SELALL},
-    {"&Overwrite Mode", "Ins", CMD_OVERWRITE},
-    {"Auto &Indent", "", CMD_AUTOINDENT}
-};
-static const MenuItem m_search[] = {
-    {"&Find...", "Ctrl+F", CMD_FIND},
-    {"Find &Next", "F3", CMD_FINDNEXT},
-    {"Find &Previous", "Shift+F3", CMD_FINDPREV},
-    {"&Replace...", "Ctrl+H", CMD_REPLACE},
-    {NULL, NULL, 0},
-    {"&Go to Line...", "Ctrl+G", CMD_GOTO}
-};
-static const MenuItem m_view[] = {
-    {"&Small Text", "", CMD_SIZE_S},
-    {"&Normal Text", "", CMD_SIZE_N},
-    {"&Large Text", "Ctrl+0", CMD_SIZE_L},
-    {NULL, NULL, 0},
-    {"&Dark Mode", "", CMD_DARK},
-    {"Line N&umbers", "Ctrl+L", CMD_LINENUM},
-    {"Tab Width &4", "", CMD_TAB4},
-    {"Tab Width &8", "", CMD_TAB8}
-};
-static const MenuItem m_help[] = {
-    {"&Keyboard...", "F1", CMD_HELP},
-    {"&About cedit...", "", CMD_ABOUT}
-};
-
-static const struct {
-    const char *title;
-    const MenuItem *items;
-    int n;
-} menus[] = {
-    {"&File", m_file, sizeof m_file / sizeof m_file[0]},
-    {"&Edit", m_edit, sizeof m_edit / sizeof m_edit[0]},
-    {"&Search", m_search, sizeof m_search / sizeof m_search[0]},
-    {"&View", m_view, sizeof m_view / sizeof m_view[0]},
-    {"&Help", m_help, sizeof m_help / sizeof m_help[0]}
-};
-#define NMENUS ((int)(sizeof menus / sizeof menus[0]))
 
 static const char *const help_lines[] = {
     "Ctrl+N  New            Ctrl+O  Open...",
@@ -183,6 +62,12 @@ static const char *const help_lines[] = {
     NULL
 };
 
+/* The editor window's text area, in cells. */
+typedef struct TextArea {
+    int x, y, w, h;
+    int gutter;             /* line number columns left of x */
+} TextArea;
+
 /* ------------------------------------------------------------------ */
 /* small helpers                                                       */
 /* ------------------------------------------------------------------ */
@@ -192,107 +77,24 @@ static unsigned long now_ms(void)
     return (unsigned long)SDL_GetTicks();
 }
 
-static void copy_str(char *dst, size_t size, const char *src)
-{
-    size_t n = strlen(src);
-    if (n >= size)
-        n = size - 1;
-    memcpy(dst, src, n);
-    dst[n] = 0;
-}
-
-static void cat_str(char *dst, size_t size, const char *src)
-{
-    size_t l = strlen(dst);
-    if (l < size)
-        copy_str(dst + l, size - l, src);
-}
-
 static void set_msg(App *a, const char *s1, const char *s2)
 {
-    copy_str(a->msg, sizeof a->msg, s1);
+    str_copy(a->msg, sizeof a->msg, s1);
     if (s2)
-        cat_str(a->msg, sizeof a->msg, s2);
+        str_cat(a->msg, sizeof a->msg, s2);
     a->msg_until = now_ms() + MSG_MS;
-}
-
-/* Display width of a UTF-8 string, ignoring '&' markers if amp is set. */
-static int str_width(const char *s, int amp)
-{
-    size_t n = strlen(s), i = 0;
-    int w = 0;
-    while (i < n) {
-        unsigned long cp;
-        i += utf8_decode(s + i, n - i, &cp);
-        if (!(amp && cp == '&'))
-            w++;
-    }
-    return w;
-}
-
-/* Draws a label with an '&'-marked hotkey; returns the width. */
-static int put_label(Screen *s, int x, int y, const char *str, int fg, int hot,
-                     int bg)
-{
-    size_t n = strlen(str), i = 0;
-    int w = 0, next_hot = 0;
-    while (i < n) {
-        unsigned long cp;
-        i += utf8_decode(str + i, n - i, &cp);
-        if (cp == '&') {
-            next_hot = 1;
-            continue;
-        }
-        screen_put(s, x + w, y, cp, next_hot ? hot : fg, bg);
-        next_hot = 0;
-        w++;
-    }
-    return w;
-}
-
-static int hotkey_of(const char *label)
-{
-    const char *p = strchr(label, '&');
-    int c = p ? (unsigned char)p[1] : 0;
-    return c >= 'A' && c <= 'Z' ? c + 32 : c;
-}
-
-static void put_frame(Screen *s, int x, int y, int w, int h, int dbl, int fg,
-                      int bg)
-{
-    int i;
-    unsigned long hz = dbl ? 0x2550 : 0x2500, vt = dbl ? 0x2551 : 0x2502;
-    screen_put(s, x, y, dbl ? 0x2554 : 0x250C, fg, bg);
-    screen_put(s, x + w - 1, y, dbl ? 0x2557 : 0x2510, fg, bg);
-    screen_put(s, x, y + h - 1, dbl ? 0x255A : 0x2514, fg, bg);
-    screen_put(s, x + w - 1, y + h - 1, dbl ? 0x255D : 0x2518, fg, bg);
-    for (i = 1; i < w - 1; i++) {
-        screen_put(s, x + i, y, hz, fg, bg);
-        screen_put(s, x + i, y + h - 1, hz, fg, bg);
-    }
-    for (i = 1; i < h - 1; i++) {
-        screen_put(s, x, y + i, vt, fg, bg);
-        screen_put(s, x + w - 1, y + i, vt, fg, bg);
-    }
 }
 
 static void update_title(App *a)
 {
     char t[512];
-    copy_str(t, sizeof t, ed_modified(&a->ed) ? "* " : "");
-    cat_str(t, sizeof t, ed_name(&a->ed));
-    cat_str(t, sizeof t, " - cedit");
+    str_copy(t, sizeof t, ed_modified(&a->ed) ? "* " : "");
+    str_cat(t, sizeof t, ed_name(&a->ed));
+    str_cat(t, sizeof t, " - cedit");
     if (strcmp(t, a->title) != 0) {
-        copy_str(a->title, sizeof a->title, t);
+        str_copy(a->title, sizeof a->title, t);
         SDL_SetWindowTitle(a->scr.win, t);
     }
-}
-
-/* cedit draws the pointer itself (see screen.h), so this only picks the
- * image. */
-static void set_pointer(App *a, int kind)
-{
-    a->scr.ptr_kind = kind;
 }
 
 static void wake_cursor(App *a)
@@ -301,10 +103,10 @@ static void wake_cursor(App *a)
     a->blink_next = now_ms() + BLINK_MS;
 }
 
-/* Text area geometry. */
-static void text_area(App *a, int *x, int *y, int *w, int *h, int *gutter)
+static TextArea text_area(App *a)
 {
-    int g = 0;
+    TextArea ta;
+    ta.gutter = 0;
     if (a->show_lnum) {
         long n = ed_lines(&a->ed);
         int digits = 1;
@@ -312,17 +114,26 @@ static void text_area(App *a, int *x, int *y, int *w, int *h, int *gutter)
             n /= 10;
             digits++;
         }
-        g = (digits < 4 ? 4 : digits) + 1;
+        ta.gutter = (digits < 4 ? 4 : digits) + 1;
     }
-    *gutter = g;
-    *x = 1 + g;
-    *y = 2;
-    *w = a->scr.cols - 2 - g;
-    *h = a->scr.rows - 4;
-    if (*w < 1)
-        *w = 1;
-    if (*h < 1)
-        *h = 1;
+    ta.x = 1 + ta.gutter;
+    ta.y = 2;
+    ta.w = a->scr.cols - 2 - ta.gutter;
+    ta.h = a->scr.rows - 4;
+    if (ta.w < 1)
+        ta.w = 1;
+    if (ta.h < 1)
+        ta.h = 1;
+    return ta;
+}
+
+/* Tells the editor the size of its view, and returns the text area. */
+static TextArea sync_view(App *a)
+{
+    TextArea ta = text_area(a);
+    a->ed.view_w = ta.w;
+    a->ed.view_h = ta.h;
+    return ta;
 }
 
 /* Loads the rest of a file that is still being indexed, showing the busy
@@ -330,10 +141,10 @@ static void text_area(App *a, int *x, int *y, int *w, int *h, int *gutter)
 static void finish_loading(App *a)
 {
     if (buf_loading(a->ed.buf)) {
-        set_pointer(a, PTR_WAIT);
+        a->scr.ptr_kind = PTR_WAIT;
         screen_present(&a->scr);        /* show the hourglass now */
         buf_load_all(a->ed.buf);
-        set_pointer(a, PTR_ARROW);
+        a->scr.ptr_kind = PTR_ARROW;
     }
 }
 
@@ -341,141 +152,13 @@ static void finish_loading(App *a)
 /* dialogs                                                             */
 /* ------------------------------------------------------------------ */
 
-static void free_items(Dialog *d)
+static void close_dialog(App *a)
 {
-    int i;
-    for (i = 0; d->items && i < d->nitems; i++)
-        free(d->items[i]);
-    free(d->items);
-    d->items = NULL;
-    d->nitems = 0;
-}
-
-static void dlg_close(App *a)
-{
-    free_items(&a->dlg);
-    a->dlg.kind = DLG_NONE;
+    dlg_close(&a->dlg);
     wake_cursor(a);
 }
 
-static void dlg_begin(App *a, int kind, const char *title, int w, int h)
-{
-    Dialog *d = &a->dlg;
-    free_items(d);
-    memset(d, 0, sizeof *d);
-    d->kind = kind;
-    copy_str(d->title, sizeof d->title, title);
-    d->w = w;
-    d->h = h;
-    d->focus = -1;
-}
-
-static Widget *dlg_add(Dialog *d, int kind, int id, int x, int y, int w,
-                       const char *label)
-{
-    Widget *wd = &d->wd[d->n++];
-    memset(wd, 0, sizeof *wd);
-    wd->kind = kind;
-    wd->id = id;
-    wd->x = x;
-    wd->y = y;
-    wd->w = w;
-    copy_str(wd->label, sizeof wd->label, label ? label : "");
-    if (kind == W_BUTTON)
-        wd->w = str_width(wd->label, 1) + 4;
-    if (d->focus < 0 && kind != W_LABEL)
-        d->focus = d->n - 1;
-    return wd;
-}
-
-static void dlg_buttons(Dialog *d, int y, const int *ids, const char *const *labels,
-                        int n)
-{
-    int i, total = 0, x, gap = 2;
-    for (i = 0; i < n; i++)
-        total += str_width(labels[i], 1) + 4 + (i ? gap : 0);
-    if (total > d->w - 2) {         /* narrow screen: tighter spacing */
-        total -= n - 1;
-        gap = 1;
-    }
-    x = (d->w - total) / 2;
-    if (x < 1)
-        x = 1;
-    for (i = 0; i < n; i++) {
-        Widget *b = dlg_add(d, W_BUTTON, ids[i], x, y, 0, labels[i]);
-        x += b->w + gap;
-    }
-}
-
-static Widget *dlg_find(Dialog *d, int id)
-{
-    int i;
-    for (i = 0; i < d->n; i++)
-        if (d->wd[i].id == id)
-            return &d->wd[i];
-    return NULL;
-}
-
-static void field_set(Widget *f, const char *s)
-{
-    copy_str(f->text, sizeof f->text, s);
-    f->len = f->cur = strlen(f->text);
-}
-
-static void field_insert(Widget *f, const char *s, size_t n)
-{
-    size_t i, m = 0;
-    char clean[FIELD_MAX];
-    for (i = 0; i < n && m < sizeof clean; i++)
-        if (s[i] != '\n' && s[i] != '\r')
-            clean[m++] = s[i];
-    if (f->len + m >= sizeof f->text)
-        return;
-    memmove(f->text + f->cur + m, f->text + f->cur, f->len - f->cur + 1);
-    memcpy(f->text + f->cur, clean, m);
-    f->len += m;
-    f->cur += m;
-}
-
-static int field_key(Widget *f, SDL_Keycode k, int ctrl)
-{
-    size_t p;
-    switch (k) {
-    case SDLK_BACKSPACE:
-        if (ctrl) {
-            memmove(f->text, f->text + f->cur, f->len - f->cur + 1);
-            f->len -= f->cur;
-            f->cur = 0;
-        } else if (f->cur > 0) {
-            p = utf8_prev(f->text, f->cur);
-            memmove(f->text + p, f->text + f->cur, f->len - f->cur + 1);
-            f->len -= f->cur - p;
-            f->cur = p;
-        }
-        return 1;
-    case SDLK_DELETE:
-        if (f->cur < f->len) {
-            p = utf8_next(f->text, f->len, f->cur);
-            memmove(f->text + f->cur, f->text + p, f->len - p + 1);
-            f->len -= p - f->cur;
-        }
-        return 1;
-    case SDLK_LEFT:
-        f->cur = utf8_prev(f->text, f->cur);
-        return 1;
-    case SDLK_RIGHT:
-        f->cur = utf8_next(f->text, f->len, f->cur);
-        return 1;
-    case SDLK_HOME:
-        f->cur = 0;
-        return 1;
-    case SDLK_END:
-        f->cur = f->len;
-        return 1;
-    }
-    return 0;
-}
-
+/* Directories first, "../" on top, then case-insensitive by name. */
 static int cmp_items(const void *pa, const void *pb)
 {
     const char *x = *(const char *const *)pa, *y = *(const char *const *)pb;
@@ -488,57 +171,46 @@ static int cmp_items(const void *pa, const void *pb)
     if (dx != dy)
         return dy - dx;
     for (; *x && *y; x++, y++) {
-        int a = (unsigned char)*x, b = (unsigned char)*y;
-        if (a >= 'A' && a <= 'Z')
-            a += 32;
-        if (b >= 'A' && b <= 'Z')
-            b += 32;
-        if (a != b)
-            return a - b;
+        int c = ascii_lower((unsigned char)*x) - ascii_lower((unsigned char)*y);
+        if (c)
+            return c;
     }
     return (unsigned char)*x - (unsigned char)*y;
 }
 
-static void load_dir(Dialog *d)
+/* Fills the file dialog's list with the entries of a->dir. */
+static void load_dir(App *a)
 {
+    Dialog *d = &a->dlg;
+    size_t n = strlen(a->dir);
     DIR *dir;
     struct dirent *e;
-    int cap = 64;
 
-    free_items(d);
-    d->items = (char **)malloc((size_t)cap * sizeof(char *));
+    /* the path label shows the tail of long paths */
+    field_set(dlg_find(d, ID_DIR), n < FIELD_MAX ? a->dir : a->dir + n - (FIELD_MAX - 1));
+    dlg_list_clear(d);
     d->sel = 0;
-    d->scroll = 0;
-    dir = opendir(d->dir);
+    dir = opendir(a->dir);
     if (!dir) {
-        copy_str(d->msg, sizeof d->msg, "Cannot read this directory.");
+        str_copy(d->msg, sizeof d->msg, "Cannot read this directory.");
         return;
     }
     while ((e = readdir(dir)) != NULL) {
-        char full[4096 + 256];
+        char full[sizeof a->dir + 256], name[258];
         struct stat st;
-        int is_dir;
-        size_t n;
         if (strcmp(e->d_name, ".") == 0)
             continue;
-        if (strcmp(e->d_name, "..") == 0 && strcmp(d->dir, "/") == 0)
+        if (strcmp(e->d_name, "..") == 0 && strcmp(a->dir, "/") == 0)
             continue;
         if (e->d_name[0] == '.' && strcmp(e->d_name, "..") != 0)
             continue;
-        copy_str(full, sizeof full, d->dir);
-        cat_str(full, sizeof full, "/");
-        cat_str(full, sizeof full, e->d_name);
-        is_dir = stat(full, &st) == 0 && S_ISDIR(st.st_mode);
-        if (d->nitems == cap) {
-            cap *= 2;
-            d->items = (char **)realloc(d->items, (size_t)cap * sizeof(char *));
-        }
-        n = strlen(e->d_name);
-        d->items[d->nitems] = (char *)malloc(n + 2);
-        memcpy(d->items[d->nitems], e->d_name, n);
-        d->items[d->nitems][n] = is_dir ? '/' : 0;
-        d->items[d->nitems][n + 1] = 0;
-        d->nitems++;
+        str_copy(full, sizeof full, a->dir);
+        str_cat(full, sizeof full, "/");
+        str_cat(full, sizeof full, e->d_name);
+        str_copy(name, sizeof name - 1, e->d_name);
+        if (stat(full, &st) == 0 && S_ISDIR(st.st_mode))
+            str_cat(name, sizeof name, "/");
+        dlg_list_add(d, name);
     }
     closedir(dir);
     qsort(d->items, (size_t)d->nitems, sizeof(char *), cmp_items);
@@ -546,7 +218,7 @@ static void load_dir(Dialog *d)
 
 static void file_dialog(App *a, int save)
 {
-    Dialog *d;
+    Dialog *d = &a->dlg;
     int w = a->scr.cols - 8, h = a->scr.rows - 4;
     static const int ids[] = {ID_OK, ID_CANCEL};
     const char *labels[2];
@@ -560,56 +232,52 @@ static void file_dialog(App *a, int save)
         w = 30;
     if (h < 12)
         h = 12;
-    dlg_begin(a, save ? DLG_SAVEAS : DLG_OPEN, save ? "Save As" : "Open", w, h);
-    d = &a->dlg;
+    dlg_begin(d, save ? DLG_SAVEAS : DLG_OPEN, save ? "Save As" : "Open", w, h);
     labels[0] = save ? "&Save" : "&Open";
     labels[1] = "Cancel";
-    dlg_add(d, W_LABEL, ID_DIR, 2, 1, w - 4, "");
+    dlg_add(d, W_PATH, ID_DIR, 2, 1, w - 4, "Dir: ");
     dlg_add(d, W_LABEL, ID_NONE, 2, 3, 10, "File name:");
     f = dlg_add(d, W_FIELD, ID_NAME, 13, 3, w - 15, NULL);
-    d->list_x = 2;
-    d->list_y = 5;
-    d->list_w = w - 4;
-    d->list_h = h - 10;
+    dlg_list(d, 3, 6, w - 6, h - 10, 1, 0);
+    d->list_field = ID_NAME;
     dlg_buttons(d, h - 3, ids, labels, 2);
     d->def_id = ID_OK;
-    d->focus = 2;
+    a->overwrite[0] = 0;
 
     /* start in the current file's directory */
     if (a->ed.path) {
         char *rp = realpath(a->ed.path, NULL), *slash;
-        copy_str(d->dir, sizeof d->dir, rp ? rp : a->ed.path);
+        str_copy(a->dir, sizeof a->dir, rp ? rp : a->ed.path);
         free(rp);
-        slash = strrchr(d->dir, '/');
-        if (slash && slash != d->dir)
+        slash = strrchr(a->dir, '/');
+        if (slash && slash != a->dir)
             *slash = 0;
         else if (slash)
             slash[1] = 0;
-        else if (!getcwd(d->dir, sizeof d->dir))
-            copy_str(d->dir, sizeof d->dir, ".");
+        else if (!getcwd(a->dir, sizeof a->dir))
+            str_copy(a->dir, sizeof a->dir, ".");
         if (save)
             field_set(f, ed_name(&a->ed));
-    } else if (!getcwd(d->dir, sizeof d->dir)) {
-        copy_str(d->dir, sizeof d->dir, ".");
+    } else if (!getcwd(a->dir, sizeof a->dir)) {
+        str_copy(a->dir, sizeof a->dir, ".");
     }
-    load_dir(d);
+    load_dir(a);
 }
 
 static void message_dialog(App *a, const char *title, const char *l1,
                            const char *l2)
 {
-    int w = 40, w1 = str_width(l1, 0) + 6, w2 = l2 ? str_width(l2, 0) + 6 : 0;
+    Dialog *d = &a->dlg;
+    int w = 40, w1 = utf8_width(l1) + 6, w2 = l2 ? utf8_width(l2) + 6 : 0;
     static const int ids[] = {ID_OK};
     static const char *const labels[] = {"OK"};
-    Dialog *d;
     if (w1 > w)
         w = w1;
     if (w2 > w)
         w = w2;
     if (w > a->scr.cols - 4)
         w = a->scr.cols - 4;
-    dlg_begin(a, DLG_MESSAGE, title, w, l2 ? 8 : 7);
-    d = &a->dlg;
+    dlg_begin(d, DLG_MESSAGE, title, w, l2 ? 8 : 7);
     dlg_add(d, W_LABEL, ID_NONE, 3, 2, w - 6, l1);
     if (l2)
         dlg_add(d, W_LABEL, ID_NONE, 3, 3, w - 6, l2);
@@ -619,53 +287,52 @@ static void message_dialog(App *a, const char *title, const char *l1,
 
 static void help_dialog(App *a)
 {
+    Dialog *d = &a->dlg;
     int i, w = 4, h;
     static const int ids[] = {ID_OK};
     static const char *const labels[] = {"OK"};
-    Dialog *d;
     for (i = 0; help_lines[i]; i++)
-        if (str_width(help_lines[i], 0) + 6 > w)
-            w = str_width(help_lines[i], 0) + 6;
+        if (utf8_width(help_lines[i]) + 6 > w)
+            w = utf8_width(help_lines[i]) + 6;
     /* scrollable when the screen is too small for all of it */
     h = i + 6;
     if (h > a->scr.rows - 2)
         h = a->scr.rows - 2;
     if (w > a->scr.cols - 4)
         w = a->scr.cols - 4;
-    dlg_begin(a, DLG_HELP, "Keyboard", w, h);
-    d = &a->dlg;
-    d->nitems = i;      /* lines; items stays NULL */
-    d->list_h = h - 6;
+    dlg_begin(d, DLG_HELP, "Keyboard", w, h);
+    dlg_list(d, 2, 2, w - 4, h - 6, 0, -1);
+    for (i = 0; help_lines[i]; i++)
+        dlg_list_add(d, help_lines[i]);
     dlg_buttons(d, d->h - 3, ids, labels, 1);
     d->def_id = ID_OK;
 }
 
 static void confirm_dialog(App *a)
 {
+    Dialog *d = &a->dlg;
     char line[300];
     static const int ids[] = {ID_YES, ID_NO, ID_CANCEL};
     static const char *const labels[] = {"&Yes", "&No", "Cancel"};
     int w;
-    Dialog *d;
 
-    copy_str(line, sizeof line, "Save changes to ");
-    cat_str(line, sizeof line, ed_name(&a->ed));
-    cat_str(line, sizeof line, "?");
-    w = str_width(line, 0) + 8;
+    str_copy(line, sizeof line, "Save changes to ");
+    str_cat(line, sizeof line, ed_name(&a->ed));
+    str_cat(line, sizeof line, "?");
+    w = utf8_width(line) + 8;
     if (w < 40)
         w = 40;
-    dlg_begin(a, DLG_CONFIRM, "cedit", w, 7);
-    d = &a->dlg;
-    dlg_add(d, W_LABEL, ID_NONE, (w - str_width(line, 0)) / 2, 2, w - 4, line);
+    dlg_begin(d, DLG_CONFIRM, "cedit", w, 7);
+    dlg_add(d, W_LABEL, ID_NONE, (w - utf8_width(line)) / 2, 2, w - 4, line);
     dlg_buttons(d, 4, ids, labels, 3);
     d->def_id = ID_YES;
 }
 
 static void find_dialog(App *a, int replace)
 {
-    Dialog *d;
+    Dialog *d = &a->dlg;
     Widget *f;
-    int w = a->scr.cols - 4 < 60 ? a->scr.cols - 4 : 60, y;
+    int w = a->scr.cols - 4 < 60 ? a->scr.cols - 4 : 60, y = 3;
     static const int fids[] = {ID_FINDNEXT, ID_CANCEL};
     static const char *const flabels[] = {"Find &Next", "Cancel"};
     static const int rids[] = {ID_FINDNEXT, ID_REPLACE, ID_REPLALL, ID_CANCEL};
@@ -673,9 +340,8 @@ static void find_dialog(App *a, int replace)
     long sy, ey;
     size_t sx, ex;
 
-    dlg_begin(a, replace ? DLG_REPLACE : DLG_FIND, replace ? "Replace" : "Find",
+    dlg_begin(d, replace ? DLG_REPLACE : DLG_FIND, replace ? "Replace" : "Find",
               w, replace ? 9 : 8);
-    d = &a->dlg;
     d->at_bottom = 1;
     dlg_add(d, W_LABEL, ID_NONE, 2, 1, 13, "Find what:");
     f = dlg_add(d, W_FIELD, ID_FIND, 16, 1, w - 18, NULL);
@@ -689,7 +355,6 @@ static void find_dialog(App *a, int replace)
         t[ex - sx] = 0;
         field_set(f, t);
     }
-    y = 3;
     if (replace) {
         dlg_add(d, W_LABEL, ID_NONE, 2, 2, 13, "Replace with:");
         field_set(dlg_add(d, W_FIELD, ID_REPL, 16, 2, w - 18, NULL), a->ed.repl);
@@ -701,26 +366,21 @@ static void find_dialog(App *a, int replace)
     else
         dlg_buttons(d, d->h - 3, fids, flabels, 2);
     d->def_id = ID_FINDNEXT;
-    d->focus = 1;
 }
 
 static void goto_dialog(App *a)
 {
-    Dialog *d;
-    Widget *f;
+    Dialog *d = &a->dlg;
     char num[32];
     static const int ids[] = {ID_OK, ID_CANCEL};
     static const char *const labels[] = {"OK", "Cancel"};
 
-    dlg_begin(a, DLG_GOTO, "Go to Line", 36, 7);
-    d = &a->dlg;
+    dlg_begin(d, DLG_GOTO, "Go to Line", 36, 7);
     dlg_add(d, W_LABEL, ID_NONE, 3, 2, 13, "Line number:");
-    f = dlg_add(d, W_FIELD, ID_LINE, 17, 2, 14, NULL);
     sprintf(num, "%ld", a->ed.cy + 1);
-    field_set(f, num);
+    field_set(dlg_add(d, W_FIELD, ID_LINE, 17, 2, 14, NULL), num);
     dlg_buttons(d, 4, ids, labels, 2);
     d->def_id = ID_OK;
-    d->focus = 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -747,7 +407,7 @@ static int do_save_path(App *a, const char *path)
     }
     sprintf(info, " (%ld lines)", ed_lines(&a->ed));
     set_msg(a, "Saved ", ed_name(&a->ed));
-    cat_str(a->msg, sizeof a->msg, info);
+    str_cat(a->msg, sizeof a->msg, info);
     return 0;
 }
 
@@ -775,11 +435,20 @@ static void run_pending(App *a)
 static void guard(App *a, int action, const char *path)
 {
     a->pending = action;
-    copy_str(a->pending_path, sizeof a->pending_path, path ? path : "");
+    str_copy(a->pending_path, sizeof a->pending_path, path ? path : "");
     if (ed_modified(&a->ed))
         confirm_dialog(a);
     else
         run_pending(a);
+}
+
+/* Saves, then runs the pending action if the save worked. */
+static void save_then_pending(App *a, const char *path)
+{
+    if (do_save_path(a, path) == 0)
+        run_pending(a);
+    else
+        a->pending = P_NONE;
 }
 
 static void do_save(App *a)
@@ -790,63 +459,64 @@ static void do_save(App *a)
         do_save_path(a, a->ed.path);
 }
 
+/* Enter in a file dialog: opens a directory, or opens / saves the file. */
 static void file_accept(App *a)
 {
     Dialog *d = &a->dlg;
     Widget *f = dlg_find(d, ID_NAME);
-    char path[4096 + FIELD_MAX];
+    char path[sizeof a->dir + FIELD_MAX];
     struct stat st;
-    int save = d->kind == DLG_SAVEAS, exists;
+    int exists;
 
+    if (d->dirty)                       /* a new name needs a new "replace?" */
+        a->overwrite[0] = 0;
+    d->dirty = 0;
     if (!f->len && d->sel < d->nitems)
         field_set(f, d->items[d->sel]);
     if (!f->len)
         return;
     if (f->text[0] == '/') {
-        copy_str(path, sizeof path, f->text);
+        str_copy(path, sizeof path, f->text);
     } else if (f->text[0] == '~' && (f->text[1] == '/' || !f->text[1]) && getenv("HOME")) {
-        copy_str(path, sizeof path, getenv("HOME"));
-        cat_str(path, sizeof path, f->text + 1);
+        str_copy(path, sizeof path, getenv("HOME"));
+        str_cat(path, sizeof path, f->text + 1);
     } else {
-        copy_str(path, sizeof path, d->dir);
-        if (strcmp(d->dir, "/") != 0)
-            cat_str(path, sizeof path, "/");
-        cat_str(path, sizeof path, f->text);
+        str_copy(path, sizeof path, a->dir);
+        if (strcmp(a->dir, "/") != 0)
+            str_cat(path, sizeof path, "/");
+        str_cat(path, sizeof path, f->text);
     }
     exists = stat(path, &st) == 0;
     if (exists && S_ISDIR(st.st_mode)) {
         char *rp = realpath(path, NULL);
-        copy_str(d->dir, sizeof d->dir, rp ? rp : path);
+        str_copy(a->dir, sizeof a->dir, rp ? rp : path);
         free(rp);
         field_set(f, "");
         d->msg[0] = 0;
-        load_dir(d);
+        load_dir(a);
         return;
     }
-    if (!save) {
+    if (d->kind == DLG_OPEN) {
         if (!exists) {
-            copy_str(d->msg, sizeof d->msg, "File not found.");
+            str_copy(d->msg, sizeof d->msg, "File not found.");
             return;
         }
-        dlg_close(a);
+        close_dialog(a);
         do_open_path(a, path);
         return;
     }
-    if (exists && strcmp(d->overwrite, path) != 0) {
-        copy_str(d->msg, sizeof d->msg, "File exists. Press Enter again to replace it.");
-        copy_str(d->overwrite, sizeof d->overwrite, path);
+    if (exists && strcmp(a->overwrite, path) != 0) {
+        str_copy(d->msg, sizeof d->msg, "File exists. Press Enter again to replace it.");
+        str_copy(a->overwrite, sizeof a->overwrite, path);
         return;
     }
-    dlg_close(a);
-    if (do_save_path(a, path) == 0 && a->pending)
-        run_pending(a);
-    else
-        a->pending = P_NONE;
+    close_dialog(a);
+    save_then_pending(a, path);
 }
 
 static void do_find(App *a, int backward)
 {
-    int r, tx, ty, tw, th, g;
+    int r, h;
     if (!a->ed.find[0]) {
         find_dialog(a, 0);
         return;
@@ -860,18 +530,17 @@ static void do_find(App *a, int backward)
     if (r == 2)
         set_msg(a, backward ? "Search wrapped to the end" : "Search wrapped to the top", NULL);
     /* keep matches in the upper part, above a find/replace dialog */
-    text_area(a, &tx, &ty, &tw, &th, &g);
-    a->ed.view_h = th;
-    a->ed.view_w = tw;
-    ed_scroll_to_cursor(&a->ed, now_ms());
-    if (a->ed.cy < a->ed.top || a->ed.cy > a->ed.top + th / 2) {
-        a->ed.top = a->ed.cy - th / 3;
+    h = sync_view(a).h;
+    ed_scroll_to_cursor(&a->ed);
+    if (a->ed.cy < a->ed.top || a->ed.cy > a->ed.top + h / 2) {
+        a->ed.top = a->ed.cy - h / 3;
         if (a->ed.top < 0)
             a->ed.top = 0;
     }
 }
 
-static void dlg_activate(App *a, int id)
+/* Acts on a dialog button (ID_CANCEL also stands for Escape). */
+static void dialog_button(App *a, int id)
 {
     Dialog *d = &a->dlg;
     Widget *w;
@@ -881,7 +550,7 @@ static void dlg_activate(App *a, int id)
     case DLG_SAVEAS:
         if (id == ID_CANCEL) {
             a->pending = P_NONE;
-            dlg_close(a);
+            close_dialog(a);
         } else {
             file_accept(a);
         }
@@ -889,17 +558,17 @@ static void dlg_activate(App *a, int id)
     case DLG_FIND:
     case DLG_REPLACE:
         if (id == ID_CANCEL) {
-            dlg_close(a);
+            close_dialog(a);
             break;
         }
-        copy_str(a->ed.find, sizeof a->ed.find, dlg_find(d, ID_FIND)->text);
+        str_copy(a->ed.find, sizeof a->ed.find, dlg_find(d, ID_FIND)->text);
         a->ed.icase = !dlg_find(d, ID_CASE)->checked;
         if ((w = dlg_find(d, ID_REPL)) != NULL)
-            copy_str(a->ed.repl, sizeof a->ed.repl, w->text);
+            str_copy(a->ed.repl, sizeof a->ed.repl, w->text);
         if (!a->ed.find[0])
             break;
         if (d->kind == DLG_FIND)
-            dlg_close(a);
+            close_dialog(a);
         if (id == ID_REPLACE) {
             finish_loading(a);
             if (!ed_replace(&a->ed))
@@ -915,25 +584,20 @@ static void dlg_activate(App *a, int id)
             do_find(a, 0);
         }
         break;
-    case DLG_GOTO:
-        if (id == ID_OK) {
-            long n = atol(dlg_find(d, ID_LINE)->text);
-            dlg_close(a);
-            if (n > 0)
-                ed_goto(&a->ed, n);
-        } else {
-            dlg_close(a);
-        }
+    case DLG_GOTO: {
+        long n = atol(dlg_find(d, ID_LINE)->text);
+        close_dialog(a);
+        if (id == ID_OK && n > 0)
+            ed_goto(&a->ed, n);
         break;
+    }
     case DLG_CONFIRM:
-        dlg_close(a);
+        close_dialog(a);
         if (id == ID_YES) {
             if (!a->ed.path)
                 file_dialog(a, 1);
-            else if (do_save_path(a, a->ed.path) == 0)
-                run_pending(a);
             else
-                a->pending = P_NONE;
+                save_then_pending(a, a->ed.path);
         } else if (id == ID_NO) {
             run_pending(a);
         } else {
@@ -941,7 +605,7 @@ static void dlg_activate(App *a, int id)
         }
         break;
     default:
-        dlg_close(a);
+        close_dialog(a);
     }
 }
 
@@ -971,10 +635,10 @@ static void do_paste(App *a)
 
 static void apply_theme(App *a)
 {
-    T = a->dark ? &theme_dark : &theme_light;
-    a->scr.cur_bg = T->cursor_bg;
-    a->scr.cur_ink = T->cursor_ink;
-    a->scr.cur_box = T->cursor_box;
+    a->theme = a->dark ? &theme_dark : &theme_light;
+    a->scr.cur_bg = a->theme->cursor_bg;
+    a->scr.cur_ink = a->theme->cursor_ink;
+    a->scr.cur_box = a->theme->cursor_box;
     a->scr.full = 1;
 }
 
@@ -993,14 +657,12 @@ static void save_settings(App *a)
 static void set_size(App *a, int size)
 {
     screen_set_size(&a->scr, size);
-    set_pointer(a, PTR_ARROW);
+    a->scr.ptr_kind = PTR_ARROW;
     save_settings(a);
 }
 
 static int cmd_enabled(App *a, int cmd)
 {
-    long sy, ey;
-    size_t sx, ex;
     switch (cmd) {
     case CMD_UNDO:
         return a->ed.undo.pos > 0;
@@ -1009,7 +671,7 @@ static int cmd_enabled(App *a, int cmd)
     case CMD_CUT:
     case CMD_COPY:
     case CMD_DELETE:
-        return ed_sel_range(&a->ed, &sy, &sx, &ey, &ex);
+        return ed_has_selection(&a->ed);
     case CMD_PASTE:
         return SDL_HasClipboardText();
     case CMD_FINDNEXT:
@@ -1042,6 +704,14 @@ static int cmd_checked(App *a, int cmd)
         return a->ed.autoindent;
     }
     return 0;
+}
+
+/* CmdState for the menus. */
+static int cmd_state(void *ctx, int cmd)
+{
+    App *a = (App *)ctx;
+    return (cmd_enabled(a, cmd) ? CMD_ENABLED : 0) |
+           (cmd_checked(a, cmd) ? CMD_CHECKED : 0);
 }
 
 static void command(App *a, int cmd)
@@ -1104,165 +774,44 @@ static void command(App *a, int cmd)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* menus                                                               */
-/* ------------------------------------------------------------------ */
-
-static int menu_x(int i)
+/* Runs a command picked from a menu, unless it is disabled. */
+static void menu_command(App *a, int cmd)
 {
-    int x = 1, j;
-    for (j = 0; j < i; j++)
-        x += str_width(menus[j].title, 1) + 2;
-    return x;
-}
-
-static void menu_geometry(int m, int *x, int *y, int *w, int *h)
-{
-    int i, lw = 0, kw = 0;
-    for (i = 0; i < menus[m].n; i++) {
-        const MenuItem *it = &menus[m].items[i];
-        if (!it->label)
-            continue;
-        if (str_width(it->label, 1) > lw)
-            lw = str_width(it->label, 1);
-        if (str_width(it->keys, 0) > kw)
-            kw = str_width(it->keys, 0);
-    }
-    *x = menu_x(m) - 1;
-    *y = 1;
-    *w = lw + kw + 7;
-    *h = menus[m].n + 2;
-}
-
-static void menu_open(App *a, int m)
-{
-    a->menu = (m + NMENUS) % NMENUS;
-    a->menu_item = 0;
-}
-
-static void menu_step(App *a, int d)
-{
-    int n = menus[a->menu].n, i = a->menu_item, k;
-    for (k = 0; k < n; k++) {
-        i = (i + d + n) % n;
-        if (menus[a->menu].items[i].label)
-            break;
-    }
-    a->menu_item = i;
-}
-
-static void menu_run(App *a, int item)
-{
-    const MenuItem *it = &menus[a->menu].items[item];
-    if (!it->label || !cmd_enabled(a, it->cmd))
+    if (cmd == CMD_NONE || !cmd_enabled(a, cmd))
         return;
-    a->menu = -1;
-    command(a, it->cmd);
-}
-
-static void draw_menus(App *a)
-{
-    Screen *s = &a->scr;
-    int i, x, y, w, h, m = a->menu;
-    char clock[32];
-    time_t t = time(NULL);
-
-    screen_fill(s, 0, 0, s->cols, 1, ' ', T->bar_fg, T->bar_bg);
-    for (i = 0; i < NMENUS; i++) {
-        int open = i == m;
-        x = menu_x(i);
-        screen_put(s, x - 1, 0, ' ', T->bar_fg, open ? T->text_bg : T->bar_bg);
-        x += put_label(s, x, 0, menus[i].title, open ? T->text_fg : T->bar_fg,
-                       open ? T->hot : T->bar_hot, open ? T->text_bg : T->bar_bg);
-        screen_put(s, x, 0, ' ', T->bar_fg, open ? T->text_bg : T->bar_bg);
-    }
-    strftime(clock, sizeof clock, "%a %m/%d %H:%M", localtime(&t));
-    screen_puts(s, s->cols - str_width(clock, 0) - 1, 0, clock, T->bar_fg,
-                T->bar_bg, 32);
-
-    if (m < 0)
-        return;
-    menu_geometry(m, &x, &y, &w, &h);
-    screen_fill(s, x, y, w, h, ' ', T->text_fg, T->text_bg);
-    put_frame(s, x, y, w, h, 0, T->frame, T->text_bg);
-    for (i = 0; i < menus[m].n; i++) {
-        const MenuItem *it = &menus[m].items[i];
-        int sel = i == a->menu_item, en, fg, bg;
-        if (!it->label) {
-            int k;
-            screen_put(s, x, y + 1 + i, 0x251C, T->frame, T->text_bg);
-            for (k = 1; k < w - 1; k++)
-                screen_put(s, x + k, y + 1 + i, 0x2500, T->frame, T->text_bg);
-            screen_put(s, x + w - 1, y + 1 + i, 0x2524, T->frame, T->text_bg);
-            continue;
-        }
-        en = cmd_enabled(a, it->cmd);
-        fg = !en ? T->disabled : sel ? T->sel_fg : T->text_fg;
-        bg = sel ? T->sel_bg : T->text_bg;
-        screen_fill(s, x + 1, y + 1 + i, w - 2, 1, ' ', fg, bg);
-        if (cmd_checked(a, it->cmd))
-            screen_put(s, x + 2, y + 1 + i, 0x2713, sel ? T->sel_hot : T->hot, bg);
-        put_label(s, x + 3, y + 1 + i, it->label, fg,
-                  !en ? T->disabled : sel ? T->sel_hot : T->hot, bg);
-        screen_puts(s, x + w - 2 - str_width(it->keys, 0), y + 1 + i, it->keys,
-                    fg, bg, 20);
-    }
-    screen_shadow(s, x + w, y + 1, 2, h);
-    screen_shadow(s, x + 2, y + h, w - 2, 1);
-}
-
-static int menu_hit(App *a, int cx, int cy, int *item)
-{
-    int x, y, w, h;
-    if (a->menu < 0)
-        return 0;
-    menu_geometry(a->menu, &x, &y, &w, &h);
-    if (cx > x && cx < x + w - 1 && cy > y && cy < y + h - 1) {
-        *item = cy - y - 1;
-        return 1;
-    }
-    return 0;
-}
-
-static int menubar_hit(int cx)
-{
-    int i;
-    for (i = 0; i < NMENUS; i++) {
-        int x = menu_x(i);
-        if (cx >= x - 1 && cx <= x + str_width(menus[i].title, 1))
-            return i;
-    }
-    return -1;
+    menu_close(&a->menu);
+    command(a, cmd);
 }
 
 /* ------------------------------------------------------------------ */
 /* drawing                                                             */
 /* ------------------------------------------------------------------ */
 
-static void draw_text(App *a, int tx, int ty, int tw, int th, int gutter)
+static void draw_text(App *a, TextArea ta)
 {
     Screen *s = &a->scr;
     Editor *ed = &a->ed;
+    const Theme *th = a->theme;
     long nlines = ed_lines(ed), row, sy = 0, ey = 0;
     size_t sx = 0, ex = 0;
     int have_sel = ed_sel_range(ed, &sy, &sx, &ey, &ex);
 
-    for (row = 0; row < th; row++) {
+    for (row = 0; row < ta.h; row++) {
         long ln = ed->top + row, d = 0;
         size_t len, i = 0;
         const char *l;
-        int y = ty + (int)row;
+        int y = ta.y + (int)row;
 
         if (ln >= nlines)
             break;
-        if (gutter) {
+        if (ta.gutter) {
             char num[32];
             int n = sprintf(num, "%ld", ln + 1);
-            screen_puts(s, tx - 1 - n, y, num, ln == ed->cy ? T->cur_lnum : T->lnum,
-                        T->text_bg, n);
+            screen_puts(s, ta.x - 1 - n, y, num, ln == ed->cy ? th->cur_lnum : th->lnum,
+                        th->text_bg, n);
         }
         l = ed_line(ed, ln, &len);
-        while (i < len && d < ed->left + tw) {
+        while (i < len && d < ed->left + ta.w) {
             unsigned long cp;
             size_t k;
             long width, c;
@@ -1276,49 +825,51 @@ static void draw_text(App *a, int tx, int ty, int tw, int th, int gutter)
                 k = utf8_decode(l + i, len - i, &cp);
                 width = 1;
             }
-            fg = sel ? T->sel_fg : T->text_fg;
-            bg = sel ? T->sel_bg : T->text_bg;
+            fg = sel ? th->sel_fg : th->text_fg;
+            bg = sel ? th->sel_bg : th->text_bg;
             if (cp < 0x20 || cp == 0x7F) {
                 /* control characters: inverse ^X letter */
                 cp = cp == 0x7F ? '?' : cp + '@';
-                fg = T->special_fg;
-                bg = sel ? T->special_sel_bg : T->special_bg;
+                fg = th->special_fg;
+                bg = sel ? th->special_sel_bg : th->special_bg;
             } else if (cp == 0xFFFD || !font_has(s->font, cp)) {
-                fg = sel ? T->sel_hot : T->bad;
+                fg = sel ? th->sel_hot : th->bad;
             }
             for (c = 0; c < width; c++) {
                 long dc = d + c;
-                if (dc >= ed->left && dc < ed->left + tw)
-                    screen_put(s, tx + (int)(dc - ed->left), y, c ? ' ' : cp, fg, bg);
+                if (dc >= ed->left && dc < ed->left + ta.w)
+                    screen_put(s, ta.x + (int)(dc - ed->left), y, c ? ' ' : cp, fg, bg);
             }
             d += width;
             i += k;
         }
         /* selected line break */
         if (have_sel && ln >= sy && ln < ey && i >= len && d >= ed->left &&
-            d < ed->left + tw && (ln > sy || len >= sx))
-            screen_put(s, tx + (int)(d - ed->left), y, ' ', T->sel_fg, T->sel_bg);
+            d < ed->left + ta.w && (ln > sy || len >= sx))
+            screen_put(s, ta.x + (int)(d - ed->left), y, ' ', th->sel_fg, th->sel_bg);
     }
 
     /* text cursor */
-    if (a->dlg.kind == DLG_NONE && a->menu < 0 && (a->blink_on || !a->focused) &&
-        ed->cy >= ed->top && ed->cy < ed->top + th) {
+    if (a->dlg.kind == DLG_NONE && a->menu.open < 0 && (a->blink_on || !a->focused) &&
+        ed->cy >= ed->top && ed->cy < ed->top + ta.h) {
         size_t len;
         const char *l = ed_line(ed, ed->cy, &len);
         long dc = ed_disp_col(ed, l, len, ed->cx) - ed->left;
-        if (dc >= 0 && dc < tw)
-            screen_cursor(s, tx + (int)dc, ty + (int)(ed->cy - ed->top),
+        if (dc >= 0 && dc < ta.w)
+            screen_cursor(s, ta.x + (int)dc, ta.y + (int)(ed->cy - ed->top),
                           ed->overwrite ? TCUR_OVERWRITE : TCUR_INSERT);
     }
 }
 
-static void scrollbar_geometry(App *a, int th, int *track, int *tpos, int *tlen)
+/* The scrollbar for a text area h rows tall: the track between the arrows,
+ * and the thumb's position and length in it. */
+static void scrollbar_geometry(App *a, int h, int *track, int *tpos, int *tlen)
 {
-    long total = ed_lines(&a->ed), range = total - th;
-    *track = th - 2;
+    long total = ed_lines(&a->ed), range = total - h;
+    *track = h - 2;
     if (*track < 1)
         *track = 1;
-    *tlen = total > th ? (int)((long)*track * th / total) : *track;
+    *tlen = total > h ? (int)((long)*track * h / total) : *track;
     if (*tlen < 1)
         *tlen = 1;
     *tpos = range > 0 ? (int)((*track - *tlen) * a->ed.top / range) : 0;
@@ -1326,34 +877,33 @@ static void scrollbar_geometry(App *a, int th, int *track, int *tpos, int *tlen)
         *tpos = *track - *tlen;
 }
 
-static void draw_window(App *a)
+static void draw_window(App *a, TextArea ta)
 {
     Screen *s = &a->scr;
     Editor *ed = &a->ed;
-    int tx, ty, tw, th, g, i, x, track, tpos, tlen;
+    const Theme *th = a->theme;
+    int i, x, track, tpos, tlen, bottom = s->rows - 2;
     char title[300], pos[96];
-    int bottom = s->rows - 2;
 
-    text_area(a, &tx, &ty, &tw, &th, &g);
-    screen_fill(s, 0, 1, s->cols, s->rows - 2, ' ', T->text_fg, T->text_bg);
-    put_frame(s, 0, 1, s->cols, s->rows - 2, 1, T->frame, T->text_bg);
+    screen_fill(s, 0, 1, s->cols, s->rows - 2, ' ', th->text_fg, th->text_bg);
+    screen_frame(s, 0, 1, s->cols, s->rows - 2, 1, th->frame, th->text_bg);
 
     /* title, inverse, centered on the top border */
-    copy_str(title, sizeof title, " ");
-    cat_str(title, sizeof title, ed_name(ed));
-    cat_str(title, sizeof title, ed_modified(ed) ? " * " : " ");
-    i = str_width(title, 0);
+    str_copy(title, sizeof title, " ");
+    str_cat(title, sizeof title, ed_name(ed));
+    str_cat(title, sizeof title, ed_modified(ed) ? " * " : " ");
+    i = utf8_width(title);
     if (i > s->cols - 4)
         i = s->cols - 4;
-    screen_puts(s, (s->cols - i) / 2, 1, title, T->title_fg, T->title_bg, i);
+    screen_puts(s, (s->cols - i) / 2, 1, title, th->title_fg, th->title_bg, i);
 
     /* scrollbar on the right border */
-    scrollbar_geometry(a, th, &track, &tpos, &tlen);
-    screen_put(s, s->cols - 1, ty, 0x25B2, T->frame, T->text_bg);
-    screen_put(s, s->cols - 1, ty + th - 1, 0x25BC, T->frame, T->text_bg);
-    for (i = 0; i < track && th > 2; i++)
-        screen_put(s, s->cols - 1, ty + 1 + i,
-                   i >= tpos && i < tpos + tlen ? 0x2588 : 0x2591, T->frame, T->text_bg);
+    scrollbar_geometry(a, ta.h, &track, &tpos, &tlen);
+    screen_put(s, s->cols - 1, ta.y, 0x25B2, th->frame, th->text_bg);
+    screen_put(s, s->cols - 1, ta.y + ta.h - 1, 0x25BC, th->frame, th->text_bg);
+    for (i = 0; i < track && ta.h > 2; i++)
+        screen_put(s, s->cols - 1, ta.y + 1 + i,
+                   i >= tpos && i < tpos + tlen ? 0x2588 : 0x2591, th->frame, th->text_bg);
 
     /* status in the bottom border, TempleOS style */
     {
@@ -1363,205 +913,66 @@ static void draw_window(App *a)
         sprintf(pos, " Line:%04ld/%04ld%s Col:%03ld ", ed->cy + 1, ed_lines(ed),
                 buf_loading(ed->buf) ? "+" : "", col);
     }
-    i = str_width(pos, 0);
-    screen_puts(s, s->cols - 2 - i, bottom, pos, T->frame, T->text_bg, i);
+    i = utf8_width(pos);
+    screen_puts(s, s->cols - 2 - i, bottom, pos, th->frame, th->text_bg, i);
     x = 2;
-    x += screen_puts(s, x, bottom, ed->overwrite ? " OVR " : " INS ", T->frame, T->text_bg, 5);
+    x += screen_puts(s, x, bottom, ed->overwrite ? " OVR " : " INS ", th->frame, th->text_bg, 5);
     x++;
-    x += screen_puts(s, x, bottom, ed->buf->crlf ? " CRLF " : " LF ", T->frame, T->text_bg, 6);
+    x += screen_puts(s, x, bottom, ed->buf->crlf ? " CRLF " : " LF ", th->frame, th->text_bg, 6);
     x++;
-    screen_puts(s, x, bottom, " UTF-8 ", T->frame, T->text_bg, 7);
+    screen_puts(s, x, bottom, " UTF-8 ", th->frame, th->text_bg, 7);
 
-    draw_text(a, tx, ty, tw, th, g);
+    draw_text(a, ta);
 }
 
 static void draw_status(App *a)
 {
     Screen *s = &a->scr;
+    const Theme *th = a->theme;
     int y = s->rows - 1, x = 1;
     static const char *const hints[] = {
         "F1", "Help", "F10", "Menu", "^O", "Open", "^S", "Save",
         "^F", "Find", "^Z", "Undo", "^Q", "Quit", NULL
     };
 
-    screen_fill(s, 0, y, s->cols, 1, ' ', T->bar_fg, T->bar_bg);
+    screen_fill(s, 0, y, s->cols, 1, ' ', th->bar_fg, th->bar_bg);
     if (a->msg[0] && now_ms() < a->msg_until) {
-        screen_puts(s, 1, y, a->msg, T->bar_fg, T->bar_bg, s->cols - 2);
+        screen_puts(s, 1, y, a->msg, th->bar_fg, th->bar_bg, s->cols - 2);
     } else {
         int i;
         for (i = 0; hints[i] && x < s->cols - 20; i += 2) {
-            x += screen_puts(s, x, y, hints[i], T->bar_hot, T->bar_bg, 8);
-            x += screen_puts(s, x + 1, y, hints[i + 1], T->bar_fg, T->bar_bg, 8) + 3;
+            x += screen_puts(s, x, y, hints[i], th->bar_hot, th->bar_bg, 8);
+            x += screen_puts(s, x + 1, y, hints[i + 1], th->bar_fg, th->bar_bg, 8) + 3;
         }
     }
     if (buf_loading(a->ed.buf)) {
         char p[32];
         int n = sprintf(p, "Loading %d%% ", (int)(buf_load_progress(a->ed.buf) * 100));
-        screen_puts(s, s->cols - n - 1, y, p, T->bar_hot, T->bar_bg, n);
+        screen_puts(s, s->cols - n - 1, y, p, th->bar_hot, th->bar_bg, n);
     }
 }
 
-static void dlg_place(App *a)
+/* The clock at the right end of the menu bar. */
+static void draw_clock(App *a)
 {
-    Dialog *d = &a->dlg;
-    Screen *s = &a->scr;
-    if (d->w > s->cols - 2)
-        d->w = s->cols - 2;
-    d->x = (s->cols - d->w) / 2;
-    d->y = d->at_bottom ? s->rows - d->h - 2 : (s->rows - d->h) / 2;
-    if (d->y < 1)
-        d->y = 1;
-}
-
-static void draw_field(App *a, Widget *f, int x, int y, int focused)
-{
-    Screen *s = &a->scr;
-    size_t i = 0, start = 0;
-    int ci = 0, col = 0, k = 0;
-    int bg = focused ? T->focus_bg : T->field_bg;
-    int fg = focused ? T->focus_fg : T->field_fg;
-
-    /* character index of the cursor, then scroll to keep it visible */
-    while (i < f->cur) {
-        i = utf8_next(f->text, f->len, i);
-        ci++;
-    }
-    i = 0;
-    while (ci - k >= f->w) {
-        i = utf8_next(f->text, f->len, i);
-        k++;
-    }
-    start = i;
-    screen_fill(s, x, y, f->w, 1, ' ', fg, bg);
-    for (i = start; i < f->len && col < f->w;) {
-        unsigned long cp;
-        i += utf8_decode(f->text + i, f->len - i, &cp);
-        screen_put(s, x + col++, y, cp, fg, bg);
-    }
-    if (focused && a->blink_on)
-        screen_cursor(s, x + ci - k, y, TCUR_INSERT);
-}
-
-static void draw_dialog(App *a)
-{
-    Screen *s = &a->scr;
-    Dialog *d = &a->dlg;
-    int i, tw;
-
-    if (d->kind == DLG_NONE)
-        return;
-    dlg_place(a);
-    screen_fill(s, d->x, d->y, d->w, d->h, ' ', T->text_fg, T->text_bg);
-    put_frame(s, d->x, d->y, d->w, d->h, 1, T->frame, T->text_bg);
-    {
-        char t[80];
-        copy_str(t, sizeof t, " ");
-        cat_str(t, sizeof t, d->title);
-        cat_str(t, sizeof t, " ");
-        tw = str_width(t, 0);
-        screen_puts(s, d->x + (d->w - tw) / 2, d->y, t, T->title_fg, T->title_bg, tw);
-    }
-    screen_shadow(s, d->x + d->w, d->y + 1, 2, d->h);
-    screen_shadow(s, d->x + 2, d->y + d->h, d->w - 2, 1);
-
-    for (i = 0; i < d->n; i++) {
-        Widget *w = &d->wd[i];
-        int x = d->x + w->x, y = d->y + w->y, foc = i == d->focus;
-        switch (w->kind) {
-        case W_LABEL:
-            if (w->id == ID_DIR) {
-                /* show the tail of long directory paths */
-                const char *p = d->dir;
-                int over = str_width(p, 0) - (w->w - 5);
-                while (over-- > 0 && *p)
-                    p++;
-                screen_puts(s, x, y, "Dir: ", T->lnum, T->text_bg, 5);
-                screen_puts(s, x + 5, y, p, T->text_fg, T->text_bg, w->w - 5);
-            } else {
-                /* clip to the dialog interior */
-                char clip[128];
-                int room = d->x + d->w - 1 - x, k = 0;
-                size_t j = 0, len = strlen(w->label);
-                while (j < len && k < room) {
-                    j = utf8_next(w->label, len, j);
-                    k++;
-                }
-                memcpy(clip, w->label, j);
-                clip[j] = 0;
-                put_label(s, x, y, clip, T->text_fg, T->hot, T->text_bg);
-            }
-            break;
-        case W_FIELD:
-            draw_field(a, w, x, y, foc);
-            break;
-        case W_CHECK:
-            screen_puts(s, x, y, w->checked ? "[\xe2\x9c\x93]" : "[ ]", foc ? T->focus_fg : T->text_fg,
-                        foc ? T->focus_bg : T->text_bg, 3);
-            put_label(s, x + 4, y, w->label, foc ? T->focus_fg : T->text_fg, T->hot,
-                      foc ? T->focus_bg : T->text_bg);
-            break;
-        case W_BUTTON:
-            screen_put(s, x, y, '[', foc ? T->sel_fg : T->text_fg, foc ? T->sel_bg : T->text_bg);
-            screen_put(s, x + 1, y, ' ', T->text_fg, foc ? T->sel_bg : T->text_bg);
-            put_label(s, x + 2, y, w->label, foc ? T->sel_fg : T->text_fg,
-                      foc ? T->sel_hot : T->hot, foc ? T->sel_bg : T->text_bg);
-            screen_put(s, x + w->w - 2, y, ' ', T->text_fg, foc ? T->sel_bg : T->text_bg);
-            screen_put(s, x + w->w - 1, y, ']', foc ? T->sel_fg : T->text_fg, foc ? T->sel_bg : T->text_bg);
-            break;
-        }
-    }
-
-    if (d->kind == DLG_HELP) {
-        int r;
-        for (r = 0; r < d->list_h && d->scroll + r < d->nitems; r++)
-            screen_puts(s, d->x + 3, d->y + 2 + r, help_lines[d->scroll + r],
-                        T->text_fg, T->text_bg, d->w - 6);
-        if (d->scroll > 0)
-            screen_put(s, d->x + d->w - 2, d->y + 2, 0x25B2, T->frame, T->text_bg);
-        if (d->scroll + d->list_h < d->nitems)
-            screen_put(s, d->x + d->w - 2, d->y + 1 + d->list_h, 0x25BC,
-                       T->frame, T->text_bg);
-    }
-    if (d->kind == DLG_OPEN || d->kind == DLG_SAVEAS) {
-        int lx = d->x + d->list_x, ly = d->y + d->list_y, r;
-        put_frame(s, lx, ly, d->list_w, d->list_h + 2, 0, T->frame, T->text_bg);
-        if (d->sel < d->scroll)
-            d->scroll = d->sel;
-        if (d->sel >= d->scroll + d->list_h)
-            d->scroll = d->sel - d->list_h + 1;
-        for (r = 0; r < d->list_h && d->scroll + r < d->nitems; r++) {
-            int idx = d->scroll + r, sel = idx == d->sel;
-            const char *name = d->items[idx];
-            int is_dir = name[strlen(name) - 1] == '/';
-            screen_fill(s, lx + 1, ly + 1 + r, d->list_w - 2, 1, ' ',
-                        sel ? T->sel_fg : T->text_fg, sel ? T->sel_bg : T->text_bg);
-            screen_puts(s, lx + 2, ly + 1 + r, name,
-                        sel ? T->sel_fg : is_dir ? T->dir : T->text_fg,
-                        sel ? T->sel_bg : T->text_bg,
-                        d->list_w - 4);
-        }
-        if (d->scroll > 0)
-            screen_put(s, lx + d->list_w - 1, ly + 1, 0x25B2, T->frame, T->text_bg);
-        if (d->scroll + d->list_h < d->nitems)
-            screen_put(s, lx + d->list_w - 1, ly + d->list_h, 0x25BC, T->frame, T->text_bg);
-        if (d->msg[0])
-            screen_puts(s, d->x + 2, d->y + d->h - 4, d->msg, T->bad, T->text_bg, d->w - 4);
-    }
+    char clock[32];
+    time_t t = time(NULL);
+    strftime(clock, sizeof clock, "%a %m/%d %H:%M", localtime(&t));
+    screen_puts(&a->scr, a->scr.cols - utf8_width(clock) - 1, 0, clock,
+                a->theme->bar_fg, a->theme->bar_bg, 32);
 }
 
 void app_draw(App *a)
 {
-    int tx, ty, tw, th, g;
+    TextArea ta = sync_view(a);
 
-    text_area(a, &tx, &ty, &tw, &th, &g);
-    a->ed.view_w = tw;
-    a->ed.view_h = th;
     if (a->ed.follow)
-        ed_scroll_to_cursor(&a->ed, now_ms());
-    draw_window(a);
+        ed_scroll_to_cursor(&a->ed);
+    draw_window(a, ta);
     draw_status(a);
-    draw_menus(a);
-    draw_dialog(a);
+    menu_draw(&a->menu, &a->scr, a->theme, cmd_state, a);
+    draw_clock(a);
+    dlg_draw(&a->dlg, &a->scr, a->theme, a->blink_on);
     update_title(a);
     screen_present(&a->scr);
 }
@@ -1570,213 +981,33 @@ void app_draw(App *a)
 /* input                                                               */
 /* ------------------------------------------------------------------ */
 
-static void help_scroll(Dialog *d, int by)
-{
-    d->scroll += by;
-    if (d->scroll > d->nitems - d->list_h)
-        d->scroll = d->nitems - d->list_h;
-    if (d->scroll < 0)
-        d->scroll = 0;
-}
-
-static int focusable(const Widget *w)
-{
-    return w->kind != W_LABEL;
-}
-
-static void dlg_focus_step(Dialog *d, int dir)
-{
-    int i = d->focus, k;
-    for (k = 0; k < d->n; k++) {
-        i = (i + dir + d->n) % d->n;
-        if (focusable(&d->wd[i]))
-            break;
-    }
-    d->focus = i;
-}
-
-static void list_select(Dialog *d, int i)
-{
-    Widget *f = dlg_find(d, ID_NAME);
-    if (d->nitems == 0)
-        return;
-    if (i < 0)
-        i = 0;
-    if (i >= d->nitems)
-        i = d->nitems - 1;
-    d->sel = i;
-    if (f)
-        field_set(f, d->items[i]);
-    d->overwrite[0] = 0;
-}
-
-static void dlg_key(App *a, const SDL_KeyboardEvent *k)
-{
-    Dialog *d = &a->dlg;
-    Widget *w = d->focus >= 0 ? &d->wd[d->focus] : NULL;
-    int ctrl = (k->keysym.mod & KMOD_CTRL) != 0;
-    int shift = (k->keysym.mod & KMOD_SHIFT) != 0;
-    int alt = (k->keysym.mod & KMOD_ALT) != 0;
-    int is_file = d->kind == DLG_OPEN || d->kind == DLG_SAVEAS;
-    SDL_Keycode sym = k->keysym.sym;
-    int i;
-
-    wake_cursor(a);
-    if (sym == SDLK_ESCAPE) {
-        dlg_activate(a, ID_CANCEL);
-        return;
-    }
-    if (d->kind == DLG_HELP && (sym == SDLK_UP || sym == SDLK_DOWN ||
-                                sym == SDLK_PAGEUP || sym == SDLK_PAGEDOWN ||
-                                sym == SDLK_HOME || sym == SDLK_END)) {
-        help_scroll(d, sym == SDLK_UP ? -1 : sym == SDLK_DOWN ? 1
-                     : sym == SDLK_PAGEUP ? -d->list_h : sym == SDLK_PAGEDOWN ? d->list_h
-                     : sym == SDLK_HOME ? -d->nitems : d->nitems);
-        return;
-    }
-    if (sym == SDLK_TAB) {
-        dlg_focus_step(d, shift ? -1 : 1);
-        return;
-    }
-    if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) {
-        dlg_activate(a, w && w->kind == W_BUTTON ? w->id : d->def_id);
-        return;
-    }
-    /* Alt+letter (or a plain letter when no field has focus) presses the
-     * matching button or toggles the matching checkbox */
-    if (alt || (w && w->kind != W_FIELD && sym < 128 && sym > ' ')) {
-        for (i = 0; i < d->n; i++) {
-            Widget *b = &d->wd[i];
-            if ((b->kind == W_BUTTON || b->kind == W_CHECK) &&
-                hotkey_of(b->label) == (int)sym) {
-                if (b->kind == W_CHECK) {
-                    b->checked = !b->checked;
-                    d->focus = i;
-                } else {
-                    dlg_activate(a, b->id);
-                }
-                return;
-            }
-        }
-    }
-    if (is_file && (sym == SDLK_UP || sym == SDLK_DOWN || sym == SDLK_PAGEUP ||
-                    sym == SDLK_PAGEDOWN)) {
-        int step = sym == SDLK_UP ? -1 : sym == SDLK_DOWN ? 1
-                 : sym == SDLK_PAGEUP ? -d->list_h : d->list_h;
-        list_select(d, d->sel + step);
-        return;
-    }
-    if (!w)
-        return;
-    switch (w->kind) {
-    case W_FIELD:
-        if (ctrl && sym == SDLK_v) {
-            char *t = SDL_GetClipboardText();
-            if (t)
-                field_insert(w, t, strlen(t));
-            SDL_free(t);
-        } else if (ctrl && sym == SDLK_a) {
-            w->cur = w->len;
-        } else {
-            field_key(w, sym, ctrl);
-        }
-        if (is_file)
-            d->overwrite[0] = 0;
-        break;
-    case W_CHECK:
-        if (sym == SDLK_SPACE)
-            w->checked = !w->checked;
-        break;
-    case W_BUTTON:
-        if (sym == SDLK_SPACE)
-            dlg_activate(a, w->id);
-        else if (sym == SDLK_LEFT || sym == SDLK_UP)
-            dlg_focus_step(d, -1);
-        else if (sym == SDLK_RIGHT || sym == SDLK_DOWN)
-            dlg_focus_step(d, 1);
-        break;
-    }
-}
-
-static void dlg_text(App *a, const char *text)
-{
-    Dialog *d = &a->dlg;
-    Widget *w = d->focus >= 0 ? &d->wd[d->focus] : NULL;
-    if (!w || w->kind != W_FIELD) {
-        if (d->kind != DLG_OPEN && d->kind != DLG_SAVEAS)
-            return;
-        w = dlg_find(d, ID_NAME);
-        d->focus = (int)(w - d->wd);
-    }
-    field_insert(w, text, strlen(text));
-    d->overwrite[0] = 0;
-}
-
-static void dlg_click(App *a, int cx, int cy, int clicks)
-{
-    Dialog *d = &a->dlg;
-    int rx = cx - d->x, ry = cy - d->y, i;
-
-    if (d->kind == DLG_OPEN || d->kind == DLG_SAVEAS) {
-        int r = ry - d->list_y - 1;
-        if (rx > d->list_x && rx < d->list_x + d->list_w - 1 && r >= 0 &&
-            r < d->list_h && d->scroll + r < d->nitems) {
-            list_select(d, d->scroll + r);
-            if (clicks >= 2)
-                file_accept(a);
-            return;
-        }
-    }
-    for (i = 0; i < d->n; i++) {
-        Widget *w = &d->wd[i];
-        int ww = w->kind == W_CHECK ? str_width(w->label, 1) + 4 : w->w;
-        if (!focusable(w) || ry != w->y || rx < w->x || rx >= w->x + ww)
-            continue;
-        d->focus = i;
-        if (w->kind == W_BUTTON)
-            dlg_activate(a, w->id);
-        else if (w->kind == W_CHECK)
-            w->checked = !w->checked;
-        else if (w->kind == W_FIELD) {
-            /* place the cursor near the click */
-            size_t p = 0;
-            int c = rx - w->x;
-            while (c-- > 0 && p < w->len)
-                p = utf8_next(w->text, w->len, p);
-            w->cur = p;
-        }
-        return;
-    }
-}
-
 /* Converts a cell in the text area to a buffer position. */
 static void cell_to_pos(App *a, int cx, int cy, long *ln, size_t *col)
 {
-    int tx, ty, tw, th, g;
+    TextArea ta = text_area(a);
     size_t len;
     const char *l;
-    text_area(a, &tx, &ty, &tw, &th, &g);
-    *ln = a->ed.top + (cy - ty);
+    *ln = a->ed.top + (cy - ta.y);
     if (*ln < 0)
         *ln = 0;
     if (*ln >= ed_lines(&a->ed))
         *ln = ed_lines(&a->ed) - 1;
     l = ed_line(&a->ed, *ln, &len);
-    *col = ed_byte_col(&a->ed, l, len, a->ed.left + (cx - tx));
+    *col = ed_byte_col(&a->ed, l, len, a->ed.left + (cx - ta.x));
 }
 
-static void scrollbar_click(App *a, int cy, int th, int ty)
+static void scrollbar_click(App *a, int cy, TextArea ta)
 {
-    int track, tpos, tlen, r = cy - ty - 1;
-    scrollbar_geometry(a, th, &track, &tpos, &tlen);
-    if (cy == ty)
+    int track, tpos, tlen, r = cy - ta.y - 1;
+    scrollbar_geometry(a, ta.h, &track, &tpos, &tlen);
+    if (cy == ta.y)
         ed_scroll(&a->ed, -1);
-    else if (cy == ty + th - 1)
+    else if (cy == ta.y + ta.h - 1)
         ed_scroll(&a->ed, 1);
     else if (r < tpos)
-        ed_scroll(&a->ed, -(th - 1));
+        ed_scroll(&a->ed, -(ta.h - 1));
     else if (r >= tpos + tlen)
-        ed_scroll(&a->ed, th - 1);
+        ed_scroll(&a->ed, ta.h - 1);
     else {
         a->drag = 2;
         a->drag_grab = r - tpos;
@@ -1785,23 +1016,22 @@ static void scrollbar_click(App *a, int cy, int th, int ty)
 
 static void scrollbar_drag(App *a, int cy)
 {
-    int tx, ty, tw, th, g, track, tpos, tlen;
-    long range;
-    text_area(a, &tx, &ty, &tw, &th, &g);
-    scrollbar_geometry(a, th, &track, &tpos, &tlen);
-    range = ed_lines(&a->ed) - th;
+    TextArea ta = text_area(a);
+    int track, tpos, tlen;
+    long range = ed_lines(&a->ed) - ta.h;
+    scrollbar_geometry(a, ta.h, &track, &tpos, &tlen);
     if (range <= 0 || track - tlen <= 0)
         return;
-    tpos = cy - ty - 1 - a->drag_grab;
+    tpos = cy - ta.y - 1 - a->drag_grab;
     a->ed.top = (long)((double)tpos * range / (track - tlen) + 0.5);
     ed_scroll(&a->ed, 0);
 }
 
 static void mouse_down(App *a, const SDL_MouseButtonEvent *b)
 {
-    int cx, cy, tx, ty, tw, th, g, item;
+    TextArea ta;
+    int cx, cy, id;
     unsigned long t = now_ms();
-    SDL_Keymod mod = SDL_GetModState();
 
     screen_cell_at(&a->scr, b->x, b->y, &cx, &cy);
     if (b->button != SDL_BUTTON_LEFT)
@@ -1816,38 +1046,24 @@ static void mouse_down(App *a, const SDL_MouseButtonEvent *b)
     wake_cursor(a);
 
     if (a->dlg.kind != DLG_NONE) {
-        dlg_click(a, cx, cy, a->click_count);
+        if ((id = dlg_click(&a->dlg, cx, cy, a->click_count)) != ID_NONE)
+            dialog_button(a, id);
         return;
     }
-    if (a->menu >= 0) {
-        if (menu_hit(a, cx, cy, &item)) {
-            menu_run(a, item);
-            return;
-        }
-        if (cy == 0 && menubar_hit(cx) >= 0 && menubar_hit(cx) != a->menu) {
-            menu_open(a, menubar_hit(cx));
-            return;
-        }
-        a->menu = -1;
+    if (a->menu.open >= 0 || cy == 0) {
+        menu_command(a, menu_click(&a->menu, cx, cy));
         return;
     }
-    if (cy == 0) {
-        if (menubar_hit(cx) >= 0)
-            menu_open(a, menubar_hit(cx));
+    ta = text_area(a);
+    if (cy < ta.y || cy >= ta.y + ta.h)
         return;
-    }
-    text_area(a, &tx, &ty, &tw, &th, &g);
-    if (cx == a->scr.cols - 1 && cy >= ty && cy < ty + th) {
-        scrollbar_click(a, cy, th, ty);
-        return;
-    }
-    if (cy >= ty && cy < ty + th && cx >= tx - g) {
+    if (cx == a->scr.cols - 1) {
+        scrollbar_click(a, cy, ta);
+    } else if (cx >= ta.x - ta.gutter) {
         long ln;
         size_t col;
-        if (cx < tx)
-            cx = tx;
-        cell_to_pos(a, cx, cy, &ln, &col);
-        ed_set_cursor(&a->ed, ln, col, (mod & KMOD_SHIFT) != 0);
+        cell_to_pos(a, cx < ta.x ? ta.x : cx, cy, &ln, &col);
+        ed_set_cursor(&a->ed, ln, col, (SDL_GetModState() & KMOD_SHIFT) != 0);
         if (a->click_count == 2)
             ed_select_word(&a->ed);
         else if (a->click_count >= 3)
@@ -1859,17 +1075,19 @@ static void mouse_down(App *a, const SDL_MouseButtonEvent *b)
 
 static void mouse_motion(App *a, const SDL_MouseMotionEvent *m)
 {
-    int cx, cy, tx, ty, tw, th, g, item;
+    TextArea ta = text_area(a);
+    int cx, cy;
+
     screen_pointer(&a->scr, m->x, m->y, 1);
     screen_cell_at(&a->scr, m->x, m->y, &cx, &cy);
     a->mouse_x = cx;
     a->mouse_y = cy;
-    text_area(a, &tx, &ty, &tw, &th, &g);
 
     if (a->drag == 1) {
         long ln;
         size_t col;
-        int x = cx < tx ? tx : cx, y = cy < ty ? ty : cy >= ty + th ? ty + th - 1 : cy;
+        int x = cx < ta.x ? ta.x : cx;
+        int y = cy < ta.y ? ta.y : cy >= ta.y + ta.h ? ta.y + ta.h - 1 : cy;
         cell_to_pos(a, x, y, &ln, &col);
         if (a->click_count == 1)
             ed_set_cursor(&a->ed, ln, col, 1);
@@ -1880,21 +1098,16 @@ static void mouse_motion(App *a, const SDL_MouseMotionEvent *m)
         scrollbar_drag(a, cy);
         return;
     }
-    if (a->menu >= 0) {
-        if (menu_hit(a, cx, cy, &item) && menus[a->menu].items[item].label)
-            a->menu_item = item;
-        else if (cy == 0 && menubar_hit(cx) >= 0 && menubar_hit(cx) != a->menu)
-            menu_open(a, menubar_hit(cx));
-    }
-    set_pointer(a, a->dlg.kind == DLG_NONE && a->menu < 0 && cy >= ty &&
-                       cy < ty + th && cx >= tx && cx < tx + tw
-                       ? PTR_IBEAM : PTR_ARROW);
+    menu_hover(&a->menu, cx, cy);
+    a->scr.ptr_kind = a->dlg.kind == DLG_NONE && a->menu.open < 0 && cy >= ta.y &&
+                              cy < ta.y + ta.h && cx >= ta.x && cx < ta.x + ta.w
+                          ? PTR_IBEAM : PTR_ARROW;
 }
 
 static void mouse_wheel(App *a, const SDL_MouseWheelEvent *w)
 {
-    SDL_Keymod mod = SDL_GetModState();
     int dy = w->y, dx = w->x;
+    SDL_Keymod mod = SDL_GetModState();
     if (w->direction == SDL_MOUSEWHEEL_FLIPPED) {
         dy = -dy;
         dx = -dx;
@@ -1904,24 +1117,11 @@ static void mouse_wheel(App *a, const SDL_MouseWheelEvent *w)
             set_size(a, a->scr.size + (dy > 0 ? 1 : -1));
         return;
     }
-    if (a->dlg.kind == DLG_HELP) {
-        help_scroll(&a->dlg, -dy * 3);
+    if (a->dlg.kind != DLG_NONE) {
+        dlg_wheel(&a->dlg, -dy * 3);
         return;
     }
-    if (a->dlg.kind == DLG_OPEN || a->dlg.kind == DLG_SAVEAS) {
-        Dialog *d = &a->dlg;
-        d->scroll -= dy * 3;
-        if (d->scroll > d->nitems - d->list_h)
-            d->scroll = d->nitems - d->list_h;
-        if (d->scroll < 0)
-            d->scroll = 0;
-        if (d->sel < d->scroll)
-            d->sel = d->scroll;
-        if (d->sel >= d->scroll + d->list_h)
-            d->sel = d->scroll + d->list_h - 1;
-        return;
-    }
-    if (a->dlg.kind != DLG_NONE || a->menu >= 0)
+    if (a->menu.open >= 0)
         return;
     if (mod & KMOD_SHIFT) {
         dx = dy;
@@ -1933,40 +1133,6 @@ static void mouse_wheel(App *a, const SDL_MouseWheelEvent *w)
         a->ed.left -= dx * 4;
         if (a->ed.left < 0)
             a->ed.left = 0;
-    }
-}
-
-static void menu_key(App *a, SDL_Keycode sym)
-{
-    int i;
-    switch (sym) {
-    case SDLK_ESCAPE:
-    case SDLK_F10:
-        a->menu = -1;
-        return;
-    case SDLK_LEFT:
-        menu_open(a, a->menu - 1);
-        return;
-    case SDLK_RIGHT:
-        menu_open(a, a->menu + 1);
-        return;
-    case SDLK_UP:
-        menu_step(a, -1);
-        return;
-    case SDLK_DOWN:
-        menu_step(a, 1);
-        return;
-    case SDLK_RETURN:
-    case SDLK_KP_ENTER:
-        menu_run(a, a->menu_item);
-        return;
-    }
-    for (i = 0; i < menus[a->menu].n; i++) {
-        const char *l = menus[a->menu].items[i].label;
-        if (l && hotkey_of(l) == (int)sym) {
-            menu_run(a, i);
-            return;
-        }
     }
 }
 
@@ -2029,17 +1195,67 @@ static void editor_key(App *a, const SDL_KeyboardEvent *k)
         else
             ed_delete(ed, ctrl, t);
         break;
-    case SDLK_INSERT:
-        if (shift)
-            command(a, CMD_PASTE);
-        else
-            command(a, CMD_OVERWRITE);
-        break;
+    case SDLK_INSERT:   command(a, shift ? CMD_PASTE : CMD_OVERWRITE); break;
     case SDLK_TAB:      ed_tab(ed, shift, t); break;
     case SDLK_ESCAPE:   ed_clear_selection(ed); break;
     case SDLK_F1:       command(a, CMD_HELP); break;
     case SDLK_F3:       command(a, shift ? CMD_FINDPREV : CMD_FINDNEXT); break;
-    case SDLK_F10:      menu_open(a, 0); break;
+    case SDLK_F10:      menu_open(&a->menu, 0); break;
+    }
+}
+
+static void key_down(App *a, const SDL_KeyboardEvent *k)
+{
+    SDL_Keycode sym = k->keysym.sym;
+    int id;
+
+    if (sym == SDLK_LALT || sym == SDLK_RALT) {
+        a->alt_tap = !k->repeat;
+        return;
+    }
+    a->alt_tap = 0;
+    if (a->dlg.kind != DLG_NONE) {
+        wake_cursor(a);
+        if ((id = dlg_key(&a->dlg, k)) != ID_NONE)
+            dialog_button(a, id);
+    } else if (a->menu.open >= 0) {
+        menu_command(a, menu_key(&a->menu, sym));
+    } else if ((k->keysym.mod & KMOD_LALT) && !(k->keysym.mod & KMOD_CTRL)) {
+        int i = menu_with_hotkey(sym);
+        if (i >= 0)
+            menu_open(&a->menu, i);
+    } else {
+        editor_key(a, k);
+    }
+}
+
+static void window_event(App *a, const SDL_WindowEvent *w)
+{
+    int x, y;
+    switch (w->event) {
+    case SDL_WINDOWEVENT_SIZE_CHANGED:
+    case SDL_WINDOWEVENT_RESIZED:
+        screen_layout(&a->scr);
+        a->ed.follow = 1;
+        break;
+    case SDL_WINDOWEVENT_EXPOSED:
+        a->scr.full = 1;
+        break;
+    case SDL_WINDOWEVENT_ENTER:
+        SDL_GetMouseState(&x, &y);
+        screen_pointer(&a->scr, x, y, 1);
+        break;
+    case SDL_WINDOWEVENT_LEAVE:
+        screen_pointer(&a->scr, 0, 0, 0);
+        break;
+    case SDL_WINDOWEVENT_FOCUS_GAINED:
+        a->focused = 1;
+        wake_cursor(a);
+        break;
+    case SDL_WINDOWEVENT_FOCUS_LOST:
+        a->focused = 0;
+        a->alt_tap = 0;
+        break;
     }
 }
 
@@ -2050,87 +1266,40 @@ void app_event(App *a, const SDL_Event *e)
         if (a->dlg.kind == DLG_CONFIRM)
             break;
         if (a->dlg.kind != DLG_NONE)
-            dlg_close(a);
-        a->menu = -1;
+            close_dialog(a);
+        menu_close(&a->menu);
         guard(a, P_QUIT, NULL);
         break;
     case SDL_WINDOWEVENT:
-        switch (e->window.event) {
-        case SDL_WINDOWEVENT_SIZE_CHANGED:
-        case SDL_WINDOWEVENT_RESIZED:
-            screen_layout(&a->scr);
-            a->ed.follow = 1;
-            break;
-        case SDL_WINDOWEVENT_EXPOSED:
-            a->scr.full = 1;
-            break;
-        case SDL_WINDOWEVENT_ENTER: {
-            int x, y;
-            SDL_GetMouseState(&x, &y);
-            screen_pointer(&a->scr, x, y, 1);
-            break;
-        }
-        case SDL_WINDOWEVENT_LEAVE:
-            screen_pointer(&a->scr, 0, 0, 0);
-            break;
-        case SDL_WINDOWEVENT_FOCUS_GAINED:
-            a->focused = 1;
-            wake_cursor(a);
-            break;
-        case SDL_WINDOWEVENT_FOCUS_LOST:
-            a->focused = 0;
-            a->alt_tap = 0;
-            break;
-        }
+        window_event(a, &e->window);
         break;
     case SDL_RENDER_TARGETS_RESET:
     case SDL_RENDER_DEVICE_RESET:
         screen_layout(&a->scr);
         break;
-    case SDL_KEYDOWN: {
-        SDL_Keycode sym = e->key.keysym.sym;
-        int alt = (e->key.keysym.mod & KMOD_LALT) != 0;
-        if (sym == SDLK_LALT || sym == SDLK_RALT) {
-            a->alt_tap = !e->key.repeat;
-            break;
-        }
-        a->alt_tap = 0;
-        if (a->dlg.kind != DLG_NONE) {
-            dlg_key(a, &e->key);
-        } else if (a->menu >= 0) {
-            menu_key(a, sym);
-        } else if (alt && !(e->key.keysym.mod & KMOD_CTRL)) {
-            int i;
-            for (i = 0; i < NMENUS; i++)
-                if (hotkey_of(menus[i].title) == (int)sym)
-                    menu_open(a, i);
-        } else {
-            editor_key(a, &e->key);
-        }
+    case SDL_KEYDOWN:
+        key_down(a, &e->key);
         break;
-    }
     case SDL_KEYUP:
         if ((e->key.keysym.sym == SDLK_LALT || e->key.keysym.sym == SDLK_RALT) &&
             a->alt_tap && a->dlg.kind == DLG_NONE) {
-            if (a->menu >= 0)
-                a->menu = -1;
+            if (a->menu.open >= 0)
+                menu_close(&a->menu);
             else
-                menu_open(a, 0);
+                menu_open(&a->menu, 0);
         }
         a->alt_tap = 0;
         break;
-    case SDL_TEXTINPUT: {
-        SDL_Keymod mod = SDL_GetModState();
+    case SDL_TEXTINPUT:
         /* Ctrl/Alt chords are commands, not text (AltGr is allowed) */
-        if (mod & (KMOD_CTRL | KMOD_LALT))
+        if (SDL_GetModState() & (KMOD_CTRL | KMOD_LALT))
             break;
         wake_cursor(a);
         if (a->dlg.kind != DLG_NONE)
-            dlg_text(a, e->text.text);
-        else if (a->menu < 0)   /* menus take letters as key presses */
+            dlg_text(&a->dlg, e->text.text);
+        else if (a->menu.open < 0)  /* menus take letters as key presses */
             ed_type(&a->ed, e->text.text, strlen(e->text.text), now_ms());
         break;
-    }
     case SDL_MOUSEBUTTONDOWN:
         mouse_down(a, &e->button);
         break;
@@ -2164,19 +1333,16 @@ void app_tick(App *a)
     }
     /* keep selecting while dragging past the top or bottom edge */
     if (a->drag == 1) {
-        int tx, ty, tw, th, g;
-        text_area(a, &tx, &ty, &tw, &th, &g);
-        if (a->mouse_y < ty || a->mouse_y >= ty + th) {
-            ed_move(&a->ed, a->mouse_y < ty ? MV_UP : MV_DOWN, 1);
-        }
+        TextArea ta = text_area(a);
+        if (a->mouse_y < ta.y || a->mouse_y >= ta.y + ta.h)
+            ed_move(&a->ed, a->mouse_y < ta.y ? MV_UP : MV_DOWN, 1);
     }
 }
 
 int app_timeout(App *a)
 {
     unsigned long t = now_ms(), next = a->blink_next;
-    time_t now = time(NULL);
-    unsigned long clock_ms = (unsigned long)(60 - now % 60) * 1000;
+    unsigned long clock_ms = (unsigned long)(60 - time(NULL) % 60) * 1000;
 
     if (buf_loading(a->ed.buf))
         return 0;
@@ -2194,7 +1360,7 @@ int app_init(App *a, int argc, char **argv)
     Config cfg;
 
     memset(a, 0, sizeof *a);
-    a->menu = -1;
+    menu_close(&a->menu);
     a->running = 1;
     a->focused = 1;
     config_load(&cfg);
@@ -2209,7 +1375,7 @@ int app_init(App *a, int argc, char **argv)
     apply_theme(a);
     /* the system pointer stays hidden over the window; we draw our own */
     SDL_ShowCursor(SDL_DISABLE);
-    set_pointer(a, PTR_ARROW);
+    a->scr.ptr_kind = PTR_ARROW;
     if (SDL_GetMouseFocus() == a->scr.win) {
         int x, y;
         SDL_GetMouseState(&x, &y);
@@ -2225,7 +1391,7 @@ int app_init(App *a, int argc, char **argv)
 
 void app_quit(App *a)
 {
-    free_items(&a->dlg);
+    dlg_close(&a->dlg);
     ed_free(&a->ed);
     screen_quit(&a->scr);
 }

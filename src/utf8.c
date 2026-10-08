@@ -1,7 +1,9 @@
 /*
- * utf8.c - UTF-8 decoding and cursor stepping.
+ * utf8.c - UTF-8 decoding, cursor stepping and width.
  */
 #include "utf8.h"
+
+#include <string.h>
 
 size_t utf8_decode(const char *str, size_t n, unsigned long *cp)
 {
@@ -51,28 +53,15 @@ size_t utf8_decode(const char *str, size_t n, unsigned long *cp)
     return len;
 }
 
-size_t utf8_encode(unsigned long cp, char *out)
+int utf8_width(const char *s)
 {
-    if (cp < 0x80) {
-        out[0] = (char)cp;
-        return 1;
+    size_t n = strlen(s), i = 0;
+    int w = 0;
+    while (i < n) {
+        i = utf8_next(s, n, i);
+        w++;
     }
-    if (cp < 0x800) {
-        out[0] = (char)(0xC0 | (cp >> 6));
-        out[1] = (char)(0x80 | (cp & 0x3F));
-        return 2;
-    }
-    if (cp < 0x10000) {
-        out[0] = (char)(0xE0 | (cp >> 12));
-        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-        out[2] = (char)(0x80 | (cp & 0x3F));
-        return 3;
-    }
-    out[0] = (char)(0xF0 | (cp >> 18));
-    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
-    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
-    out[3] = (char)(0x80 | (cp & 0x3F));
-    return 4;
+    return w;
 }
 
 size_t utf8_next(const char *s, size_t n, size_t i)

@@ -3,6 +3,7 @@
  */
 #include "editor.h"
 #include "utf8.h"
+#include "util.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -10,14 +11,6 @@
 enum { K_NONE, K_TYPE, K_BACK, K_DEL, K_OTHER };
 
 #define GROUP_MS 1000   /* a pause this long starts a new undo step */
-
-static void *xmalloc(size_t n)
-{
-    void *p = malloc(n ? n : 1);
-    if (!p)
-        abort();
-    return p;
-}
 
 void ed_init(Editor *ed)
 {
@@ -51,22 +44,28 @@ static void reset_view(Editor *ed)
     ed->follow = 1;
 }
 
-void ed_new(Editor *ed)
+/* path may be ed->path itself. */
+static void set_path(Editor *ed, const char *path)
+{
+    char *p = path ? xstrdup(path) : NULL;
+    free(ed->path);
+    ed->path = p;
+}
+
+/* Replaces the buffer with b, dropping the undo history. */
+static void set_buffer(Editor *ed, Buffer *b, const char *path)
 {
     buf_free(ed->buf);
     undo_free(&ed->undo);
-    ed->buf = buf_new();
+    ed->buf = b;
     undo_init(&ed->undo);
-    free(ed->path);
-    ed->path = NULL;
+    set_path(ed, path);
     reset_view(ed);
 }
 
-static char *dupstr(const char *s)
+void ed_new(Editor *ed)
 {
-    char *d = (char *)xmalloc(strlen(s) + 1);
-    strcpy(d, s);
-    return d;
+    set_buffer(ed, buf_new(), NULL);
 }
 
 int ed_open(Editor *ed, const char *path, char *err, size_t errlen)
@@ -78,13 +77,7 @@ int ed_open(Editor *ed, const char *path, char *err, size_t errlen)
         buf_free(b);
         return -1;
     }
-    buf_free(ed->buf);
-    undo_free(&ed->undo);
-    ed->buf = b;
-    undo_init(&ed->undo);
-    free(ed->path);
-    ed->path = dupstr(path);
-    reset_view(ed);
+    set_buffer(ed, b, path);
     return is_new;
 }
 
@@ -94,10 +87,7 @@ int ed_save(Editor *ed, const char *path, char *err, size_t errlen)
         return -1;
     undo_mark_saved(&ed->undo);
     ed->last_kind = K_NONE;
-    if (ed->path != path) {
-        free(ed->path);
-        ed->path = dupstr(path);
-    }
+    set_path(ed, path);
     return 0;
 }
 
@@ -257,6 +247,13 @@ int ed_sel_range(const Editor *ed, long *sy, size_t *sx, long *ey, size_t *ex)
         *ex = ed->ax;
     }
     return 1;
+}
+
+int ed_has_selection(const Editor *ed)
+{
+    long sy, ey;
+    size_t sx, ex;
+    return ed_sel_range(ed, &sy, &sx, &ey, &ex);
 }
 
 static void begin_move(Editor *ed, int extend)
@@ -450,13 +447,12 @@ void ed_scroll(Editor *ed, long lines)
         ed->top = 0;
 }
 
-void ed_scroll_to_cursor(Editor *ed, unsigned long now)
+void ed_scroll_to_cursor(Editor *ed)
 {
     size_t len;
     const char *l;
     long d, h = ed->view_h > 0 ? ed->view_h : 1, w = ed->view_w > 0 ? ed->view_w : 1;
 
-    (void)now;
     clamp(ed);
     if (ed->cy < ed->top)
         ed->top = ed->top - ed->cy > h ? ed->cy - h / 3 : ed->cy;
@@ -517,16 +513,28 @@ static int del_sel(Editor *ed)
     return 1;
 }
 
+/* Deletes the selection as an undo step of its own; returns 0 if there is
+ * none. */
+static int delete_selection(Editor *ed, unsigned long now)
+{
+    if (!ed_has_selection(ed)) {
+        ed->sel = 0;
+        return 0;
+    }
+    group(ed, K_OTHER, 0, now);
+    del_sel(ed);
+    after_edit(ed);
+    return 1;
+}
+
 void ed_type(Editor *ed, const char *s, size_t n, unsigned long now)
 {
     size_t off;
     int space = n == 1 && (s[0] == ' ' || s[0] == '\t');
-    long sy, ey;
-    size_t sx, ex;
 
     if (!n)
         return;
-    if (ed_sel_range(ed, &sy, &sx, &ey, &ex))
+    if (ed_has_selection(ed))
         ed->moved = 1;          /* replacing a selection starts a new step */
     group(ed, K_TYPE, space, now);
     del_sel(ed);
@@ -611,22 +619,15 @@ void ed_tab(Editor *ed, int unindent, unsigned long now)
         ed->cx = line_len(ed, ey);
     }
     after_edit(ed);
-    ed->last_kind = K_OTHER;
 }
 
 void ed_backspace(Editor *ed, int word, unsigned long now)
 {
-    size_t len, start, sx, ex;
+    size_t len, start;
     const char *l;
-    long sy, ey;
 
-    if (ed_sel_range(ed, &sy, &sx, &ey, &ex)) {
-        group(ed, K_OTHER, 0, now);
-        del_sel(ed);
-        after_edit(ed);
+    if (delete_selection(ed, now))
         return;
-    }
-    ed->sel = 0;
     group(ed, K_BACK, 0, now);
     l = ed_line(ed, ed->cy, &len);
     if (ed->cx > 0) {
@@ -649,16 +650,9 @@ void ed_delete(Editor *ed, int word, unsigned long now)
 {
     size_t len, end, off;
     const char *l;
-    long sy, ey;
-    size_t sx, ex;
 
-    if (ed_sel_range(ed, &sy, &sx, &ey, &ex)) {
-        group(ed, K_OTHER, 0, now);
-        del_sel(ed);
-        after_edit(ed);
+    if (delete_selection(ed, now))
         return;
-    }
-    ed->sel = 0;
     group(ed, K_DEL, 0, now);
     l = ed_line(ed, ed->cy, &len);
     off = cur_off(ed);
@@ -692,7 +686,6 @@ void ed_paste(Editor *ed, const char *s, size_t n)
     free(t);
     off_pos(ed, off + m, &ed->cy, &ed->cx);
     after_edit(ed);
-    ed->last_kind = K_OTHER;
 }
 
 char *ed_copy(Editor *ed, size_t *n)
@@ -719,10 +712,7 @@ char *ed_copy(Editor *ed, size_t *n)
 
 void ed_cut(Editor *ed)
 {
-    group(ed, K_OTHER, 0, 0);
-    if (del_sel(ed))
-        after_edit(ed);
-    ed->last_kind = K_OTHER;
+    delete_selection(ed, 0);
 }
 
 static void after_undo(Editor *ed, size_t c)
@@ -796,25 +786,19 @@ int ed_find(Editor *ed, int backward)
     return wrapped ? 2 : 1;
 }
 
-static int lower(int c)
-{
-    return c >= 'A' && c <= 'Z' ? c + 32 : c;
-}
-
 int ed_replace(Editor *ed)
 {
     long sy, ey;
     size_t sx, ex, plen = strlen(ed->find), rlen = strlen(ed->repl);
 
+    /* replace the selection if it is a match, then find the next one */
     if (ed_sel_range(ed, &sy, &sx, &ey, &ex)) {
-        size_t a = pos_off(ed, sy, sx), b = pos_off(ed, ey, ex), i;
+        size_t a = pos_off(ed, sy, sx), b = pos_off(ed, ey, ex);
         int same = b - a == plen;
         if (same) {
-            char *t = (char *)xmalloc(plen + 1);
+            char *t = (char *)xmalloc(plen);
             buf_copy(ed->buf, a, plen, t);
-            for (i = 0; i < plen && same; i++)
-                same = ed->icase ? lower((unsigned char)t[i]) == lower((unsigned char)ed->find[i])
-                                 : t[i] == ed->find[i];
+            same = mem_match(t, ed->find, plen, ed->icase);
             free(t);
         }
         if (same) {
@@ -824,7 +808,6 @@ int ed_replace(Editor *ed)
             off_pos(ed, a + rlen, &ed->cy, &ed->cx);
             ed->sel = 0;
             after_edit(ed);
-            ed->last_kind = K_OTHER;
         }
     }
     return ed_find(ed, 0);
@@ -846,9 +829,7 @@ long ed_replace_all(Editor *ed)
         count++;
     }
     ed->sel = 0;
-    clamp(ed);
     after_edit(ed);
-    ed->last_kind = K_OTHER;
     return count;
 }
 
