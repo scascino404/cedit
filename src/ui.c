@@ -1206,7 +1206,13 @@ static void scrollbar_drag(App *a, int cy)
     if (range <= 0 || track - tlen <= 0)
         return;
     tpos = cy - ta.y - 1 - a->drag_grab;
-    a->ed.top = (long)((double)tpos * range / (track - tlen) + 0.5);
+    if (tpos < 0)
+        tpos = 0;
+    if (tpos > track - tlen)
+        tpos = track - tlen;
+    /* round up, so scrollbar_geometry's rounding down puts the thumb back
+     * under the pointer */
+    a->ed.top = ((long)tpos * range + track - tlen - 1) / (track - tlen);
     ed_scroll(&a->ed, 0);
 }
 
