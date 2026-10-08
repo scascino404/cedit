@@ -97,6 +97,8 @@ int main(int argc, char **argv)
         app_tick(&app);
     app.blink_on = 1;
     app.blink_next = 0xFFFFFFFFUL;
+    /* no pointer until the script moves the mouse (m:) */
+    screen_pointer(&app.scr, 0, 0, 0);
     for (i = 3; i < argc; i++) {
         const char *t = argv[i];
         if (t[0] == 'k' && t[1] == ':') key(t + 2);
