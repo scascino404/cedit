@@ -1,0 +1,19 @@
+{
+    "configurations": [
+        {
+            "name": "cedit",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c89",
+            "intelliSenseMode": "linux-clang-x64",
+            "includePath": [
+                "${workspaceFolder}/src",
+                "/usr/include/SDL2"
+            ],
+            "defines": [
+                "_REENTRANT"
+            ]
+        }
+    ],
+    "version": 4
+}
