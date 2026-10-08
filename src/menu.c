@@ -103,7 +103,7 @@ static void geometry(int m, int *x, int *y, int *w, int *h)
     }
     *x = title_x(m) - 1;
     *y = 1;
-    *w = lw + kw + 7;
+    *w = lw + kw + 8;
     *h = menus[m].n + 2;
 }
 
@@ -185,7 +185,7 @@ void menu_draw(const MenuBar *m, Screen *s, const Theme *t, CmdState state,
         screen_fill(s, x + 1, row, w - 2, 1, ' ', fg, bg);
         if (st & CMD_CHECKED)
             screen_put(s, x + 2, row, 0x2713, sel ? t->sel_hot : t->hot, bg);
-        screen_label(s, x + 3, row, it->label, fg,
+        screen_label(s, x + 4, row, it->label, fg,
                      !(st & CMD_ENABLED) ? t->disabled : sel ? t->sel_hot : t->hot, bg);
         screen_puts(s, x + w - 2 - label_width(it->keys), row, it->keys, fg, bg, 20);
     }

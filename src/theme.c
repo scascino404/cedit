@@ -4,9 +4,9 @@
 #include "theme.h"
 #include "screen.h"
 
-/* TempleOS: blue ink on white paper */
+/* TempleOS: black ink on white paper, with blue frames and bars */
 const Theme theme_light = {
-    BLUE, WHITE,                    /* text */
+    BLACK, WHITE,                   /* text */
     WHITE, BLUE,                    /* selection */
     BLUE,                           /* frame */
     WHITE, BLUE,                    /* title */
@@ -15,15 +15,15 @@ const Theme theme_light = {
     LIGHTGRAY, DARKGRAY, BLUE,      /* disabled, line numbers */
     WHITE, RED, MAGENTA,            /* control characters */
     RED,                            /* bad */
-    BLUE, LIGHTCYAN,                /* field */
-    BLUE, YELLOW,                   /* focus */
+    BLACK, LIGHTCYAN,               /* field */
+    BLACK, YELLOW,                  /* focus */
     RED,                            /* directories */
-    YELLOW, BLUE, RED               /* cursor */
+    YELLOW, BLACK, RED              /* cursor */
 };
 
-/* Dark mode: light gray on black, same blue bars and yellow block cursor */
+/* Dark mode: white on black, same blue bars and yellow block cursor */
 const Theme theme_dark = {
-    LIGHTGRAY, BLACK,               /* text */
+    WHITE, BLACK,                   /* text */
     WHITE, BLUE,                    /* selection */
     LIGHTBLUE,                      /* frame */
     WHITE, BLUE,                    /* title */
