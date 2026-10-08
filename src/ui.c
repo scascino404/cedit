@@ -120,7 +120,7 @@ static TextArea text_area(App *a)
     ta.x = 1 + ta.gutter;
     ta.y = 2;
     ta.w = a->scr.cols - 2 - ta.gutter;
-    ta.h = a->scr.rows - 4;
+    ta.h = a->scr.rows - 3;
     if (ta.w < 1)
         ta.w = 1;
     if (ta.h < 1)
@@ -1056,11 +1056,11 @@ static void draw_window(App *a, TextArea ta)
     Screen *s = &a->scr;
     Editor *ed = &a->ed;
     const Theme *th = a->theme;
-    int i, x, track, tpos, tlen, bottom = s->rows - 2;
-    char title[300], pos[96];
+    int i, x, track, tpos, tlen, bottom = s->rows - 1;
+    char title[300], pos[96], line[300];
 
-    screen_fill(s, 0, 1, s->cols, s->rows - 2, ' ', th->text_fg, th->text_bg);
-    screen_frame(s, 0, 1, s->cols, s->rows - 2, 1, th->frame, th->text_bg);
+    screen_fill(s, 0, 1, s->cols, s->rows - 1, ' ', th->text_fg, th->text_bg);
+    screen_frame(s, 0, 1, s->cols, s->rows - 1, 1, th->frame, th->text_bg);
 
     /* title, inverse, centered on the top border */
     str_copy(title, sizeof title, " ");
@@ -1079,51 +1079,44 @@ static void draw_window(App *a, TextArea ta)
         screen_put(s, s->cols - 1, ta.y + 1 + i,
                    i >= tpos && i < tpos + tlen ? 0x2588 : 0x2591, th->frame, th->text_bg);
 
-    /* status in the bottom border, TempleOS style */
-    {
+    /* status in the bottom border, TempleOS style. A message takes all
+     * of it, inverse like the title, until it times out. */
+    if (a->msg[0] && now_ms() < a->msg_until) {
+        str_copy(line, sizeof line, " ");
+        str_cat(line, sizeof line, a->msg);
+        str_cat(line, sizeof line, " ");
+        screen_puts(s, 2, bottom, line, th->title_fg, th->title_bg, s->cols - 4);
+    } else {
+        /* the position on the right, and on the left what fits of the mode,
+         * line ends, encoding and loading progress */
+        const char *left[4];
+        char load[32];
         size_t len;
         const char *l = ed_line(ed, ed->cy, &len);
         long col = ed_disp_col(ed, l, len, ed->cx) + 1;
+        int end;
         sprintf(pos, " Line:%04ld/%04ld%s Col:%03ld ", ed->cy + 1, ed_lines(ed),
                 buf_loading(ed->buf) ? "+" : "", col);
+        i = utf8_width(pos);
+        if (i > s->cols - 4)
+            i = s->cols - 4;
+        end = s->cols - 2 - i;
+        screen_puts(s, end, bottom, pos, th->frame, th->text_bg, i);
+        left[0] = ed->overwrite ? " OVR " : " INS ";
+        left[1] = ed->buf->crlf ? " CRLF " : " LF ";
+        left[2] = " UTF-8 ";
+        left[3] = NULL;
+        if (buf_loading(ed->buf)) {
+            sprintf(load, " Loading %d%% ", (int)(buf_load_progress(ed->buf) * 100));
+            left[3] = load;
+        }
+        /* each part and a border cell after it */
+        for (i = 0, x = 2; i < 4 && left[i] && x + utf8_width(left[i]) < end; i++)
+            x += screen_puts(s, x, bottom, left[i], th->frame, th->text_bg,
+                             utf8_width(left[i])) + 1;
     }
-    i = utf8_width(pos);
-    screen_puts(s, s->cols - 2 - i, bottom, pos, th->frame, th->text_bg, i);
-    x = 2;
-    x += screen_puts(s, x, bottom, ed->overwrite ? " OVR " : " INS ", th->frame, th->text_bg, 5);
-    x++;
-    x += screen_puts(s, x, bottom, ed->buf->crlf ? " CRLF " : " LF ", th->frame, th->text_bg, 6);
-    x++;
-    screen_puts(s, x, bottom, " UTF-8 ", th->frame, th->text_bg, 7);
 
     draw_text(a, ta);
-}
-
-static void draw_status(App *a)
-{
-    Screen *s = &a->scr;
-    const Theme *th = a->theme;
-    int y = s->rows - 1, x = 1;
-    static const char *const hints[] = {
-        "F1", "Help", "F10", "Menu", "^O", "Open", "^S", "Save",
-        "^F", "Find", "^Z", "Undo", "^Q", "Quit", NULL
-    };
-
-    screen_fill(s, 0, y, s->cols, 1, ' ', th->bar_fg, th->bar_bg);
-    if (a->msg[0] && now_ms() < a->msg_until) {
-        screen_puts(s, 1, y, a->msg, th->bar_fg, th->bar_bg, s->cols - 2);
-    } else {
-        int i;
-        for (i = 0; hints[i] && x < s->cols - 20; i += 2) {
-            x += screen_puts(s, x, y, hints[i], th->bar_hot, th->bar_bg, 8);
-            x += screen_puts(s, x + 1, y, hints[i + 1], th->bar_fg, th->bar_bg, 8) + 3;
-        }
-    }
-    if (buf_loading(a->ed.buf)) {
-        char p[32];
-        int n = sprintf(p, "Loading %d%% ", (int)(buf_load_progress(a->ed.buf) * 100));
-        screen_puts(s, s->cols - n - 1, y, p, th->bar_hot, th->bar_bg, n);
-    }
 }
 
 /* The clock at the right end of the menu bar, if there is room for it. */
@@ -1138,10 +1131,10 @@ static void draw_clock(App *a)
         screen_puts(&a->scr, x, 0, clock, a->theme->bar_fg, a->theme->bar_bg, 32);
 }
 
-/* Fits the menus to the screen. They stay above the status bar. */
+/* Fits the menus to the screen. */
 static void layout_menus(App *a)
 {
-    menu_layout(&a->menu, a->scr.cols, a->scr.rows - 1);
+    menu_layout(&a->menu, a->scr.cols, a->scr.rows);
 }
 
 void app_draw(App *a)
@@ -1152,7 +1145,6 @@ void app_draw(App *a)
     if (a->ed.follow)
         ed_scroll_to_cursor(&a->ed);
     draw_window(a, ta);
-    draw_status(a);
     menu_draw(&a->menu, &a->scr, a->theme, cmd_state, a);
     draw_clock(a);
     dlg_draw(&a->dlg, &a->scr, a->theme, a->blink_on);

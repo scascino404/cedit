@@ -26,6 +26,11 @@ enum { TCUR_NONE, TCUR_INSERT, TCUR_OVERWRITE };
 /* Text sizes. */
 enum { SIZE_SMALL, SIZE_NORMAL, SIZE_LARGE, SIZE_COUNT };
 
+/* The smallest grid the UI is laid out for. A smaller window gets the
+ * grid cut off at its right and bottom edges. */
+#define MIN_COLS 20
+#define MIN_ROWS 8
+
 typedef struct Cell {
     unsigned long ch;
     unsigned char fg, bg, cur;
@@ -36,7 +41,9 @@ typedef struct Screen {
     SDL_Renderer *ren;
     SDL_Texture *tex;
     const Font *font;
-    int size;               /* SIZE_* */
+    int size;               /* SIZE_*, as chosen */
+    int shown;              /* the size drawn: smaller while the chosen
+                               one does not fit MIN_COLS x MIN_ROWS */
     int hidpi;              /* output pixels per window unit */
     int scale;              /* output pixels per font pixel */
     int cols, rows;
@@ -62,6 +69,7 @@ int screen_init(Screen *s, int size);
 void screen_quit(Screen *s);
 /* Recomputes the grid after a resize or text size change. */
 void screen_layout(Screen *s);
+/* Chooses the text size, and the smallest window that fits a grid of it. */
 void screen_set_size(Screen *s, int size);
 
 /* Drawing. Cells outside the grid are ignored. */

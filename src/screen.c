@@ -31,7 +31,6 @@ int screen_init(Screen *s, int size)
     SDL_Rect usable;
 
     memset(s, 0, sizeof *s);
-    s->size = size;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     /* about 80x25 cells of the chosen size, within 90% of the display */
     w = 80 * sizes[size].font->w * sizes[size].mult;
@@ -47,13 +46,12 @@ int screen_init(Screen *s, int size)
                               SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!s->win)
         return -1;
-    SDL_SetWindowMinimumSize(s->win, 320, 200);
     s->ren = SDL_CreateRenderer(s->win, -1, SDL_RENDERER_ACCELERATED);
     if (!s->ren)
         s->ren = SDL_CreateRenderer(s->win, -1, SDL_RENDERER_SOFTWARE);
     if (!s->ren)
         return -1;
-    screen_layout(s);
+    screen_set_size(s, size);
     return 0;
 }
 
@@ -109,16 +107,22 @@ void screen_layout(Screen *s)
     s->hidpi = s->win_w > 0 ? (s->out_w + s->win_w / 2) / s->win_w : 1;
     if (s->hidpi < 1)
         s->hidpi = 1;
-    s->font = sizes[s->size].font;
-    s->scale = sizes[s->size].mult * s->hidpi;
-    s->cw = s->font->w;
-    s->ch = s->font->h;
-    cols = s->out_w / (s->cw * s->scale);
-    rows = s->out_h / (s->ch * s->scale);
-    if (cols < 20)
-        cols = 20;
-    if (rows < 8)
-        rows = 8;
+    /* the chosen size, or the largest smaller one whose grid fits, for a
+     * window manager that makes the window smaller than its minimum */
+    for (s->shown = s->size; ; s->shown--) {
+        s->font = sizes[s->shown].font;
+        s->scale = sizes[s->shown].mult * s->hidpi;
+        s->cw = s->font->w;
+        s->ch = s->font->h;
+        cols = s->out_w / (s->cw * s->scale);
+        rows = s->out_h / (s->ch * s->scale);
+        if (s->shown == 0 || (cols >= MIN_COLS && rows >= MIN_ROWS))
+            break;
+    }
+    if (cols < MIN_COLS)
+        cols = MIN_COLS;
+    if (rows < MIN_ROWS)
+        rows = MIN_ROWS;
 
     if (cols != s->cols || rows != s->rows || !s->tex ||
         s->fb_w != cols * s->cw || s->fb_h != rows * s->ch) {
@@ -150,6 +154,8 @@ void screen_set_size(Screen *s, int size)
     if (size >= SIZE_COUNT)
         size = SIZE_COUNT - 1;
     s->size = size;
+    SDL_SetWindowMinimumSize(s->win, MIN_COLS * sizes[size].font->w * sizes[size].mult,
+                             MIN_ROWS * sizes[size].font->h * sizes[size].mult);
     screen_layout(s);
 }
 

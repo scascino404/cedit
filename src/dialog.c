@@ -266,11 +266,11 @@ static void resize(Dialog *d, int w, int h)
 }
 
 /* Sizes the dialog to fit the screen, between its smallest and full size,
- * and centers it (or puts it above the status bar). */
+ * and centers it (or puts it above the window's bottom border). */
 static void place(Dialog *d, const Screen *s)
 {
     int w = d->max_w < s->cols - 4 ? d->max_w : s->cols - 4;
-    int h = d->max_h < s->rows - 4 ? d->max_h : s->rows - 4;
+    int h = d->max_h < s->rows - 3 ? d->max_h : s->rows - 3;
     if (w < d->min_w)
         w = d->min_w;
     if (h < d->min_h)
@@ -280,7 +280,7 @@ static void place(Dialog *d, const Screen *s)
     d->x = (s->cols - d->w) / 2;
     if (d->x < 0)
         d->x = 0;
-    d->y = d->at_bottom ? s->rows - d->h - 2 : (s->rows - d->h) / 2;
+    d->y = d->at_bottom ? s->rows - d->h - 1 : (s->rows - d->h) / 2;
     if (d->y < 1)
         d->y = 1;
 }

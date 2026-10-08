@@ -42,7 +42,7 @@ typedef struct Dialog {
     int max_w, max_h;       /* the size it was built at, and the smallest it */
     int min_w, min_h;       /* shrinks to on a small screen (the same unless
                                the owner lowers them) */
-    int at_bottom;          /* sit above the status bar, not centered */
+    int at_bottom;          /* sit above the bottom border, not centered */
     char title[64];
     Widget wd[24];
     int n, focus;

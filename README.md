@@ -140,6 +140,10 @@ Settings are changed from the menus and remembered across sessions in
 All three are multiplied by the display's HiDPI factor, so the pixels stay
 crisp and square.
 
+The window can't be made smaller than 20×8 cells of the chosen size. A
+window manager that sizes it smaller anyway (a tiling one, say) gets the
+next smaller size that fits, until the window is big enough again.
+
 ### Character set
 
 Files are edited as UTF-8, and any bytes, valid or not, are saved back

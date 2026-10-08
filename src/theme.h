@@ -11,7 +11,7 @@ typedef struct Theme {
     unsigned char sel_fg, sel_bg;       /* selection, highlighted item */
     unsigned char frame;                /* borders and scrollbar */
     unsigned char title_fg, title_bg;   /* window and dialog titles */
-    unsigned char bar_fg, bar_bg, bar_hot;  /* menu bar and status bar */
+    unsigned char bar_fg, bar_bg, bar_hot;  /* menu bar */
     unsigned char hot, sel_hot;         /* hotkey letters */
     unsigned char disabled, lnum, cur_lnum;
     unsigned char special_fg, special_bg, special_sel_bg;  /* ^X controls */

@@ -26,7 +26,8 @@ typedef struct App {
     int pending;            /* action waiting for "save changes?" */
     char pending_path[4096];
 
-    char msg[256];          /* status bar message, shown until msg_until */
+    char msg[256];          /* message in the window's bottom border,
+                               shown until msg_until */
     unsigned long msg_until;
 
     int blink_on;
