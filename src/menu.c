@@ -189,8 +189,6 @@ void menu_draw(const MenuBar *m, Screen *s, const Theme *t, CmdState state,
                      !(st & CMD_ENABLED) ? t->disabled : sel ? t->sel_hot : t->hot, bg);
         screen_puts(s, x + w - 2 - label_width(it->keys), row, it->keys, fg, bg, 20);
     }
-    screen_shadow(s, x + w, y + 1, 2, h);
-    screen_shadow(s, x + 2, y + h, w - 2, 1);
 }
 
 int menu_key(MenuBar *m, SDL_Keycode sym)
