@@ -85,6 +85,7 @@ Settings are changed from the menus and remembered across sessions in
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / Copy / Paste (system clipboard) |
 | `Ctrl+A` | Select all |
 | `Shift` + movement, mouse drag | Select (double-click: word, triple-click: line) |
+| Right-click, `Menu` key or `Shift+F10` | Context menu (Undo, Cut, Copy, Paste, Delete, Select All) |
 | `Ctrl+Left` / `Ctrl+Right` | Previous / next word |
 | `Ctrl+Up` / `Ctrl+Down` | Scroll without moving the cursor |
 | `Home` / `End`, `Ctrl+Home` / `Ctrl+End` | Line start (smart) / end, file start / end |

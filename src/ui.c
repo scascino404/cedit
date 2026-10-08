@@ -1027,6 +1027,48 @@ static void scrollbar_drag(App *a, int cy)
     ed_scroll(&a->ed, 0);
 }
 
+/* A right click on the text opens the context menu there. It moves the
+ * cursor to the click, unless the click is inside the selection. In an open
+ * menu, it works like a left click. */
+static void right_click(App *a, int cx, int cy)
+{
+    TextArea ta = text_area(a);
+    long ln, sy, ey;
+    size_t col, sx, ex;
+
+    if (a->dlg.kind != DLG_NONE || a->drag)
+        return;
+    if (a->menu.open >= 0) {
+        menu_command(a, menu_click(&a->menu, cx, cy));
+        return;
+    }
+    if (cy < ta.y || cy >= ta.y + ta.h || cx < ta.x - ta.gutter || cx >= ta.x + ta.w)
+        return;
+    cell_to_pos(a, cx < ta.x ? ta.x : cx, cy, &ln, &col);
+    if (!ed_sel_range(&a->ed, &sy, &sx, &ey, &ex) ||
+        ln < sy || (ln == sy && col < sx) || ln > ey || (ln == ey && col >= ex)) {
+        ed_set_cursor(&a->ed, ln, col, 0);
+        a->ed.follow = 0;
+    }
+    menu_popup(&a->menu, cx, cy, a->scr.cols, a->scr.rows);
+}
+
+/* The Menu key or Shift+F10 opens the context menu below the text cursor,
+ * scrolling it into view first. */
+static void cursor_popup(App *a)
+{
+    TextArea ta = text_area(a);
+    Editor *ed = &a->ed;
+    size_t len;
+    const char *l = ed_line(ed, ed->cy, &len);
+    long dc;
+
+    ed_scroll_to_cursor(ed);
+    dc = ed_disp_col(ed, l, len, ed->cx) - ed->left;
+    menu_popup(&a->menu, ta.x + (int)dc, ta.y + (int)(ed->cy - ed->top) + 1,
+               a->scr.cols, a->scr.rows);
+}
+
 static void mouse_down(App *a, const SDL_MouseButtonEvent *b)
 {
     TextArea ta;
@@ -1034,6 +1076,8 @@ static void mouse_down(App *a, const SDL_MouseButtonEvent *b)
     unsigned long t = now_ms();
 
     screen_cell_at(&a->scr, b->x, b->y, &cx, &cy);
+    if (b->button == SDL_BUTTON_RIGHT)
+        right_click(a, cx, cy);
     if (b->button != SDL_BUTTON_LEFT)
         return;
     if (t - a->click_time < DCLICK_MS && cx == a->click_x && cy == a->click_y)
@@ -1200,7 +1244,14 @@ static void editor_key(App *a, const SDL_KeyboardEvent *k)
     case SDLK_ESCAPE:   ed_clear_selection(ed); break;
     case SDLK_F1:       command(a, CMD_HELP); break;
     case SDLK_F3:       command(a, shift ? CMD_FINDPREV : CMD_FINDNEXT); break;
-    case SDLK_F10:      menu_open(&a->menu, 0); break;
+    case SDLK_F10:
+        if (shift)
+            cursor_popup(a);
+        else
+            menu_open(&a->menu, 0);
+        break;
+    case SDLK_APPLICATION:
+    case SDLK_MENU:     cursor_popup(a); break;
     }
 }
 

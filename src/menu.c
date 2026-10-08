@@ -54,6 +54,16 @@ static const MenuItem m_help[] = {
     {"&Keyboard...", "F1", CMD_HELP},
     {"&About cedit...", "", CMD_ABOUT}
 };
+static const MenuItem m_context[] = {
+    {"&Undo", "Ctrl+Z", CMD_UNDO},
+    {NULL, NULL, 0},
+    {"Cu&t", "Ctrl+X", CMD_CUT},
+    {"&Copy", "Ctrl+C", CMD_COPY},
+    {"&Paste", "Ctrl+V", CMD_PASTE},
+    {"&Delete", "Del", CMD_DELETE},
+    {NULL, NULL, 0},
+    {"Select &All", "Ctrl+A", CMD_SELALL}
+};
 
 static const struct {
     const char *title;
@@ -64,9 +74,12 @@ static const struct {
     {"&Edit", m_edit, sizeof m_edit / sizeof m_edit[0]},
     {"&Search", m_search, sizeof m_search / sizeof m_search[0]},
     {"&View", m_view, sizeof m_view / sizeof m_view[0]},
-    {"&Help", m_help, sizeof m_help / sizeof m_help[0]}
+    {"&Help", m_help, sizeof m_help / sizeof m_help[0]},
+    {NULL, m_context, sizeof m_context / sizeof m_context[0]}
 };
-#define NMENUS ((int)(sizeof menus / sizeof menus[0]))
+/* The bar shows all menus but the last, the context menu. */
+#define NMENUS ((int)(sizeof menus / sizeof menus[0]) - 1)
+#define CONTEXT NMENUS
 
 /* Column of menu i's title. */
 static int title_x(int i)
@@ -89,9 +102,9 @@ static int title_at(int cx)
     return -1;
 }
 
-static void geometry(int m, int *x, int *y, int *w, int *h)
+static void geometry(const MenuBar *mb, int *x, int *y, int *w, int *h)
 {
-    int i, lw = 0, kw = 0;
+    int i, lw = 0, kw = 0, m = mb->open;
     for (i = 0; i < menus[m].n; i++) {
         const MenuItem *it = &menus[m].items[i];
         if (!it->label)
@@ -101,8 +114,8 @@ static void geometry(int m, int *x, int *y, int *w, int *h)
         if (label_width(it->keys) > kw)
             kw = label_width(it->keys);
     }
-    *x = title_x(m) - 1;
-    *y = 1;
+    *x = m == CONTEXT ? mb->x : title_x(m) - 1;
+    *y = m == CONTEXT ? mb->y : 1;
     *w = lw + kw + 8;
     *h = menus[m].n + 2;
 }
@@ -113,7 +126,7 @@ static int item_at(const MenuBar *m, int cx, int cy)
     int x, y, w, h;
     if (m->open < 0)
         return -1;
-    geometry(m->open, &x, &y, &w, &h);
+    geometry(m, &x, &y, &w, &h);
     if (cx > x && cx < x + w - 1 && cy > y && cy < y + h - 1)
         return cy - y - 1;
     return -1;
@@ -123,6 +136,20 @@ void menu_open(MenuBar *m, int i)
 {
     m->open = (i + NMENUS) % NMENUS;
     m->item = 0;
+}
+
+void menu_popup(MenuBar *m, int cx, int cy, int cols, int rows)
+{
+    int x, y, w, h;
+    m->open = CONTEXT;
+    m->item = -1;
+    m->x = cx;
+    m->y = cy;
+    geometry(m, &x, &y, &w, &h);
+    if (cx + w > cols)
+        m->x = cx + 1 - w < 0 ? 0 : cx + 1 - w;
+    if (cy + h > rows)
+        m->y = cy + 1 - h < 1 ? 1 : cy + 1 - h;
 }
 
 void menu_close(MenuBar *m)
@@ -141,7 +168,8 @@ int menu_with_hotkey(SDL_Keycode sym)
 
 static void step(MenuBar *m, int d)
 {
-    int n = menus[m->open].n, i = m->item, k;
+    int n = menus[m->open].n, k;
+    int i = m->item >= 0 ? m->item : d > 0 ? n - 1 : 0;   /* -1: none yet */
     for (k = 0; k < n; k++) {
         i = (i + d + n) % n;
         if (menus[m->open].items[i].label)
@@ -167,7 +195,7 @@ void menu_draw(const MenuBar *m, Screen *s, const Theme *t, CmdState state,
     if (o < 0)
         return;
 
-    geometry(o, &x, &y, &w, &h);
+    geometry(m, &x, &y, &w, &h);
     screen_fill(s, x, y, w, h, ' ', t->text_fg, t->text_bg);
     screen_frame(s, x, y, w, h, 0, t->frame, t->text_bg);
     for (i = 0; i < menus[o].n; i++) {
@@ -200,10 +228,9 @@ int menu_key(MenuBar *m, SDL_Keycode sym)
         menu_close(m);
         return CMD_NONE;
     case SDLK_LEFT:
-        menu_open(m, m->open - 1);
-        return CMD_NONE;
     case SDLK_RIGHT:
-        menu_open(m, m->open + 1);
+        if (m->open != CONTEXT)
+            menu_open(m, m->open + (sym == SDLK_LEFT ? -1 : 1));
         return CMD_NONE;
     case SDLK_UP:
         step(m, -1);
@@ -213,7 +240,7 @@ int menu_key(MenuBar *m, SDL_Keycode sym)
         return CMD_NONE;
     case SDLK_RETURN:
     case SDLK_KP_ENTER:
-        return menus[m->open].items[m->item].cmd;
+        return m->item >= 0 ? menus[m->open].items[m->item].cmd : CMD_NONE;
     }
     for (i = 0; i < menus[m->open].n; i++) {
         const char *l = menus[m->open].items[i].label;
@@ -242,6 +269,6 @@ void menu_hover(MenuBar *m, int cx, int cy)
         return;
     if (item >= 0 && menus[m->open].items[item].label)
         m->item = item;
-    else if (i >= 0 && i != m->open)
+    else if (i >= 0 && i != m->open && m->open != CONTEXT)
         menu_open(m, i);
 }

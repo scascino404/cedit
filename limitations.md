@@ -46,8 +46,7 @@ editor. The most noticeable gaps come first; the rest are grouped by area.
 - No multiple cursors, and no column (block) selection.
 - No drag-and-drop of selected text. Dropping a *file* onto the window does
   open it.
-- No middle-click paste of the X11/Wayland primary selection, and no
-  right-click context menu.
+- No middle-click paste of the X11/Wayland primary selection.
 - `Tab` always inserts a tab character. There is no "insert spaces" option,
   and the tab width (4 or 8) only affects display.
 - No auto-closing of brackets or quotes, no comment toggling, no

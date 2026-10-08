@@ -2,6 +2,7 @@
  * menu.h - the menu bar and its pull-down menus.
  *
  * The menu tables in menu.c list every command with its label and shortcut.
+ * One more menu, the context menu, is not on the bar but pops up anywhere.
  * The owner runs the commands and tells the menus which are enabled or
  * checked.
  */
@@ -26,11 +27,15 @@ typedef int (*CmdState)(void *ctx, int cmd);
 
 typedef struct MenuBar {
     int open;               /* index of the open menu, or -1 */
-    int item;               /* highlighted item */
+    int item;               /* highlighted item, or -1 */
+    int x, y;               /* top-left cell of the context menu */
 } MenuBar;
 
 /* Opens menu i, wrapping around at both ends. */
 void menu_open(MenuBar *m, int i);
+/* Opens the context menu with its corner at cell (cx, cy), flipped left or
+ * up if it would not fit on a cols x rows screen. */
+void menu_popup(MenuBar *m, int cx, int cy, int cols, int rows);
 void menu_close(MenuBar *m);
 /* Index of the menu whose title has hotkey sym, or -1. */
 int menu_with_hotkey(SDL_Keycode sym);

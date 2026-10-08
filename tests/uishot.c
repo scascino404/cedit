@@ -3,7 +3,8 @@
  * checking the look without a display.
  *   SDL_VIDEODRIVER=offscreen uishot out-prefix file [script]
  * Script tokens: k:<keyname>[+shift|+ctrl|+alt] t:<text> c:<col>,<row> (click)
- *                d:<col>,<row> (double click) w:<n> (wheel) s (screenshot)
+ *                d:<col>,<row> (double click) r:<col>,<row> (right click)
+ *                w:<n> (wheel) s (screenshot)
  *                m:<col>,<row> (move the mouse there)
  */
 #define _XOPEN_SOURCE 700
@@ -61,7 +62,7 @@ static void key(const char *spec)
     frame();
 }
 
-static void click(int cx, int cy, int times)
+static void click(int cx, int cy, int button, int times)
 {
     SDL_Event e;
     int i;
@@ -70,7 +71,7 @@ static void click(int cx, int cy, int times)
     for (i = 0; i < times; i++) {
         memset(&e, 0, sizeof e);
         e.type = SDL_MOUSEBUTTONDOWN;
-        e.button.button = SDL_BUTTON_LEFT;
+        e.button.button = (Uint8)button;
         e.button.x = px;
         e.button.y = py;
         app_event(&app, &e);
@@ -109,10 +110,10 @@ int main(int argc, char **argv)
             strncpy(e.text.text, t + 2, sizeof e.text.text - 1);
             app_event(&app, &e);
             frame();
-        } else if ((t[0] == 'c' || t[0] == 'd') && t[1] == ':') {
+        } else if ((t[0] == 'c' || t[0] == 'd' || t[0] == 'r') && t[1] == ':') {
             int x, y;
             sscanf(t + 2, "%d,%d", &x, &y);
-            click(x, y, t[0] == 'd' ? 2 : 1);
+            click(x, y, t[0] == 'r' ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT, t[0] == 'd' ? 2 : 1);
         } else if (t[0] == 'm' && t[1] == ':') {
             SDL_Event e;
             int x, y;
