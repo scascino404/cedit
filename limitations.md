@@ -39,6 +39,9 @@ editor. The most noticeable gaps come first; the rest are grouped by area.
   restore.
 - The Open dialog hides dotfiles (type the name to open one). It has no path
   autocompletion and no file-type filter.
+- The file menu (`Ctrl+P`) starts at the current file's directory and can't
+  go up to its parent. It leaves out dotfiles, and has no filtering beyond
+  jumping to the next name that starts with a typed letter.
 - No printing and no export.
 
 ## Editing

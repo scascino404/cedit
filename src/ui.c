@@ -42,6 +42,7 @@ static const char *const help_lines[] = {
     "Ctrl+N  New            Ctrl+O  Open...",
     "Ctrl+S  Save           Ctrl+Shift+S  Save As...",
     "Ctrl+Q  Exit           F10 / Alt  Menu bar",
+    "Ctrl+P  Folders and files in the current directory",
     "",
     "Ctrl+Z  Undo           Ctrl+Y  Redo",
     "Ctrl+X  Cut            Ctrl+C  Copy",
@@ -136,6 +137,39 @@ static TextArea sync_view(App *a)
     return ta;
 }
 
+/* The cell of the text cursor, scrolling it into view first. */
+static void cursor_cell(App *a, int *cx, int *cy)
+{
+    TextArea ta = text_area(a);
+    Editor *ed = &a->ed;
+    size_t len;
+    const char *l = ed_line(ed, ed->cy, &len);
+
+    ed_scroll_to_cursor(ed);
+    *cx = ta.x + (int)(ed_disp_col(ed, l, len, ed->cx) - ed->left);
+    *cy = ta.y + (int)(ed->cy - ed->top);
+}
+
+/* Sets a->dir to the current file's directory, or to the working directory
+ * for an untitled buffer. */
+static void current_dir(App *a)
+{
+    if (a->ed.path) {
+        char *rp = realpath(a->ed.path, NULL), *slash;
+        str_copy(a->dir, sizeof a->dir, rp ? rp : a->ed.path);
+        free(rp);
+        slash = strrchr(a->dir, '/');
+        if (slash && slash != a->dir)
+            *slash = 0;
+        else if (slash)
+            slash[1] = 0;
+        else if (!getcwd(a->dir, sizeof a->dir))
+            str_copy(a->dir, sizeof a->dir, ".");
+    } else if (!getcwd(a->dir, sizeof a->dir)) {
+        str_copy(a->dir, sizeof a->dir, ".");
+    }
+}
+
 /* Loads the rest of a file that is still being indexed, showing the busy
  * pointer for the moment it takes. */
 static void finish_loading(App *a)
@@ -219,48 +253,28 @@ static void load_dir(App *a)
 static void file_dialog(App *a, int save)
 {
     Dialog *d = &a->dlg;
-    int w = a->scr.cols - 8, h = a->scr.rows - 4;
+    int w = 70, h = 24;
     static const int ids[] = {ID_OK, ID_CANCEL};
     const char *labels[2];
     Widget *f;
 
-    if (w > 70)
-        w = 70;
-    if (h > 24)
-        h = 24;
-    if (w < 30)
-        w = 30;
-    if (h < 12)
-        h = 12;
     dlg_begin(d, save ? DLG_SAVEAS : DLG_OPEN, save ? "Save As" : "Open", w, h);
+    d->min_w = 30;
+    d->min_h = 12;
     labels[0] = save ? "&Save" : "&Open";
     labels[1] = "Cancel";
-    dlg_add(d, W_PATH, ID_DIR, 2, 1, w - 4, "Dir: ");
+    dlg_add(d, W_PATH, ID_DIR, 2, 1, w - 4, "Dir: ")->stretch = 1;
     dlg_add(d, W_LABEL, ID_NONE, 2, 3, 10, "File name:");
     f = dlg_add(d, W_FIELD, ID_NAME, 13, 3, w - 15, NULL);
+    f->stretch = 1;
     dlg_list(d, 3, 6, w - 6, h - 10, 1, 0);
     d->list_field = ID_NAME;
     dlg_buttons(d, h - 3, ids, labels, 2);
     d->def_id = ID_OK;
     a->overwrite[0] = 0;
-
-    /* start in the current file's directory */
-    if (a->ed.path) {
-        char *rp = realpath(a->ed.path, NULL), *slash;
-        str_copy(a->dir, sizeof a->dir, rp ? rp : a->ed.path);
-        free(rp);
-        slash = strrchr(a->dir, '/');
-        if (slash && slash != a->dir)
-            *slash = 0;
-        else if (slash)
-            slash[1] = 0;
-        else if (!getcwd(a->dir, sizeof a->dir))
-            str_copy(a->dir, sizeof a->dir, ".");
-        if (save)
-            field_set(f, ed_name(&a->ed));
-    } else if (!getcwd(a->dir, sizeof a->dir)) {
-        str_copy(a->dir, sizeof a->dir, ".");
-    }
+    current_dir(a);
+    if (save && a->ed.path)
+        field_set(f, ed_name(&a->ed));
     load_dir(a);
 }
 
@@ -275,9 +289,8 @@ static void message_dialog(App *a, const char *title, const char *l1,
         w = w1;
     if (w2 > w)
         w = w2;
-    if (w > a->scr.cols - 4)
-        w = a->scr.cols - 4;
     dlg_begin(d, DLG_MESSAGE, title, w, l2 ? 8 : 7);
+    d->min_w = 20;                      /* long lines are cut off */
     dlg_add(d, W_LABEL, ID_NONE, 3, 2, w - 6, l1);
     if (l2)
         dlg_add(d, W_LABEL, ID_NONE, 3, 3, w - 6, l2);
@@ -294,13 +307,11 @@ static void help_dialog(App *a)
     for (i = 0; help_lines[i]; i++)
         if (utf8_width(help_lines[i]) + 6 > w)
             w = utf8_width(help_lines[i]) + 6;
-    /* scrollable when the screen is too small for all of it */
     h = i + 6;
-    if (h > a->scr.rows - 2)
-        h = a->scr.rows - 2;
-    if (w > a->scr.cols - 4)
-        w = a->scr.cols - 4;
     dlg_begin(d, DLG_HELP, "Keyboard", w, h);
+    /* on a small screen, lines are cut off and the list scrolls */
+    d->min_w = 20;
+    d->min_h = 8;
     dlg_list(d, 2, 2, w - 4, h - 6, 0, -1);
     for (i = 0; help_lines[i]; i++)
         dlg_list_add(d, help_lines[i]);
@@ -323,6 +334,7 @@ static void confirm_dialog(App *a)
     if (w < 40)
         w = 40;
     dlg_begin(d, DLG_CONFIRM, "cedit", w, 7);
+    d->min_w = 30;
     dlg_add(d, W_LABEL, ID_NONE, (w - utf8_width(line)) / 2, 2, w - 4, line);
     dlg_buttons(d, 4, ids, labels, 3);
     d->def_id = ID_YES;
@@ -332,7 +344,7 @@ static void find_dialog(App *a, int replace)
 {
     Dialog *d = &a->dlg;
     Widget *f;
-    int w = a->scr.cols - 4 < 60 ? a->scr.cols - 4 : 60, y = 3;
+    int w = 60, y = 3;
     static const int fids[] = {ID_FINDNEXT, ID_CANCEL};
     static const char *const flabels[] = {"Find &Next", "Cancel"};
     static const int rids[] = {ID_FINDNEXT, ID_REPLACE, ID_REPLALL, ID_CANCEL};
@@ -342,9 +354,11 @@ static void find_dialog(App *a, int replace)
 
     dlg_begin(d, replace ? DLG_REPLACE : DLG_FIND, replace ? "Replace" : "Find",
               w, replace ? 9 : 8);
+    d->min_w = replace ? 54 : 40;       /* room for the buttons */
     d->at_bottom = 1;
     dlg_add(d, W_LABEL, ID_NONE, 2, 1, 13, "Find what:");
     f = dlg_add(d, W_FIELD, ID_FIND, 16, 1, w - 18, NULL);
+    f->stretch = 1;
     field_set(f, a->ed.find);
     /* a short single-line selection becomes the search text */
     if (ed_sel_range(&a->ed, &sy, &sx, &ey, &ex) && sy == ey && ex - sx < 200) {
@@ -357,7 +371,9 @@ static void find_dialog(App *a, int replace)
     }
     if (replace) {
         dlg_add(d, W_LABEL, ID_NONE, 2, 2, 13, "Replace with:");
-        field_set(dlg_add(d, W_FIELD, ID_REPL, 16, 2, w - 18, NULL), a->ed.repl);
+        f = dlg_add(d, W_FIELD, ID_REPL, 16, 2, w - 18, NULL);
+        f->stretch = 1;
+        field_set(f, a->ed.repl);
         y = 4;
     }
     dlg_add(d, W_CHECK, ID_CASE, 2, y, 20, "Match &case")->checked = !a->ed.icase;
@@ -457,6 +473,155 @@ static void do_save(App *a)
         file_dialog(a, 1);
     else
         do_save_path(a, a->ed.path);
+}
+
+/* A file size as ls -h shows it: "980", "4.2K", "17M". */
+static void format_size(char *out, double n)
+{
+    static const char units[] = " KMGT";
+    int u = 0;
+    while (n >= 1000 && u < 4) {
+        n /= 1024;
+        u++;
+    }
+    if (u == 0)
+        sprintf(out, "%d", (int)n);
+    else if (n < 9.95)
+        sprintf(out, "%.1f%c", n, units[u]);
+    else
+        sprintf(out, "%d%c", (int)(n + 0.5), units[u]);
+}
+
+/* A directory entry for the file menu. */
+typedef struct DirEntry {
+    char *name;             /* folders end in '/', as in the Open dialog */
+    char size[16];
+    int flags;              /* LI_* */
+} DirEntry;
+
+static int cmp_entries(const void *pa, const void *pb)
+{
+    return cmp_items(&((const DirEntry *)pa)->name, &((const DirEntry *)pb)->name);
+}
+
+/* Inserts the folders and then the files of directory path into the file
+ * menu, from item at on, depth levels deep. The open file is checked.
+ * Dotfiles are left out, as in the Open dialog. Returns how many items it
+ * added, or -1 if the directory can't be read. */
+static int add_dir(App *a, const char *path, int at, int depth)
+{
+    DirEntry *ents = NULL;
+    int n = 0, i;
+    struct stat cur;
+    int have_cur = a->ed.path && stat(a->ed.path, &cur) == 0;
+    DIR *dir = opendir(path);
+    struct dirent *e;
+
+    if (!dir)
+        return -1;
+    while ((e = readdir(dir)) != NULL) {
+        char full[sizeof a->pending_path + 256];
+        struct stat st;
+        DirEntry *d;
+        if (e->d_name[0] == '.')
+            continue;
+        str_copy(full, sizeof full, path);
+        str_cat(full, sizeof full, "/");
+        str_cat(full, sizeof full, e->d_name);
+        if (stat(full, &st) != 0 || !(S_ISDIR(st.st_mode) || S_ISREG(st.st_mode)))
+            continue;
+        /* the capacity is n rounded up to a power of two */
+        if ((n & (n - 1)) == 0)
+            ents = (DirEntry *)xrealloc(ents, (size_t)(n ? 2 * n : 1) * sizeof *ents);
+        d = &ents[n++];
+        d->name = (char *)xmalloc(strlen(e->d_name) + 2);
+        str_copy(d->name, strlen(e->d_name) + 2, e->d_name);
+        d->size[0] = 0;
+        d->flags = 0;
+        if (S_ISDIR(st.st_mode)) {
+            strcat(d->name, "/");
+            d->flags = LI_FOLDER;
+        } else {
+            format_size(d->size, (double)st.st_size);
+            if (have_cur && st.st_dev == cur.st_dev && st.st_ino == cur.st_ino)
+                d->flags = LI_CHECKED;
+        }
+    }
+    closedir(dir);
+    qsort(ents, (size_t)n, sizeof *ents, cmp_entries);
+    for (i = 0; i < n; i++) {
+        menu_list_insert(&a->menu, at + i, ents[i].name, ents[i].size, depth, ents[i].flags);
+        free(ents[i].name);
+    }
+    free(ents);
+    return n;
+}
+
+/* The path of file menu item i: a->dir, then the folders it is in. */
+static void item_path(App *a, int i, char *out, size_t size)
+{
+    int p = menu_list_parent(&a->menu, i);
+    if (p >= 0) {
+        item_path(a, p, out, size);         /* ends in '/' */
+    } else {
+        str_copy(out, size, a->dir);
+        if (strcmp(a->dir, "/") != 0)
+            str_cat(out, size, "/");
+    }
+    str_cat(out, size, a->menu.list[i].label);
+}
+
+/* Pops up the folders and files of the current directory under the text
+ * cursor, with the open file highlighted. */
+static void file_menu(App *a)
+{
+    int i, n, cx, cy, cur = -1;
+
+    menu_list_clear(&a->menu);
+    current_dir(a);
+    n = add_dir(a, a->dir, 0, 0);
+    if (n <= 0) {
+        set_msg(a, n < 0 ? "Cannot read " : "No files in ", a->dir);
+        return;
+    }
+    for (i = 0; i < n; i++)
+        if (a->menu.list[i].flags & LI_CHECKED)
+            cur = i;
+    cursor_cell(a, &cx, &cy);
+    menu_popup_list(&a->menu, cx, cy + 1, cur);
+}
+
+/* Opens or closes folder i of the file menu. */
+static void toggle_folder(App *a, int i)
+{
+    char path[sizeof a->pending_path];
+    const char *rel;                        /* below the menu's top folder */
+    int n;
+
+    if (a->menu.list[i].flags & LI_OPEN) {
+        menu_list_collapse(&a->menu, i);
+        return;
+    }
+    item_path(a, i, path, sizeof path);
+    rel = path + strlen(a->dir) + (strcmp(a->dir, "/") != 0);
+    n = add_dir(a, path, i + 1, a->menu.list[i].depth + 1);
+    if (n < 0) {
+        set_msg(a, "Cannot read ", rel);
+        return;
+    }
+    a->menu.list[i].flags |= LI_OPEN;
+    if (n == 0)
+        set_msg(a, "No files in ", rel);
+}
+
+/* Opens file i of the file menu, unless it is the open one. */
+static void open_listed(App *a, int i)
+{
+    char path[sizeof a->pending_path];
+    if (a->menu.list[i].flags & LI_CHECKED)
+        return;
+    item_path(a, i, path, sizeof path);
+    guard(a, P_OPEN_PATH, path);
 }
 
 /* Enter in a file dialog: opens a directory, or opens / saves the file. */
@@ -718,6 +883,10 @@ static void command(App *a, int cmd)
 {
     unsigned long t = now_ms();
     wake_cursor(a);
+    if (cmd >= CMD_LIST) {
+        open_listed(a, cmd - CMD_LIST);
+        return;
+    }
     switch (cmd) {
     case CMD_NEW:       guard(a, P_NEW, NULL); break;
     case CMD_OPEN:      guard(a, P_OPEN, NULL); break;
@@ -766,6 +935,7 @@ static void command(App *a, int cmd)
         a->ed.autoindent = !a->ed.autoindent;
         save_settings(a);
         break;
+    case CMD_FILES:     file_menu(a); break;
     case CMD_HELP:      help_dialog(a); break;
     case CMD_ABOUT:
         message_dialog(a, "About", "cedit 0.1 - Classic Text Editor",
@@ -779,6 +949,10 @@ static void menu_command(App *a, int cmd)
 {
     if (cmd == CMD_NONE || !cmd_enabled(a, cmd))
         return;
+    if (cmd >= CMD_LIST && (a->menu.list[cmd - CMD_LIST].flags & LI_FOLDER)) {
+        toggle_folder(a, cmd - CMD_LIST);   /* the menu stays open */
+        return;
+    }
     menu_close(&a->menu);
     command(a, cmd);
 }
@@ -952,20 +1126,29 @@ static void draw_status(App *a)
     }
 }
 
-/* The clock at the right end of the menu bar. */
+/* The clock at the right end of the menu bar, if there is room for it. */
 static void draw_clock(App *a)
 {
     char clock[32];
     time_t t = time(NULL);
+    int x;
     strftime(clock, sizeof clock, "%a %m/%d %H:%M", localtime(&t));
-    screen_puts(&a->scr, a->scr.cols - utf8_width(clock) - 1, 0, clock,
-                a->theme->bar_fg, a->theme->bar_bg, 32);
+    x = a->scr.cols - utf8_width(clock) - 1;
+    if (x > menu_bar_width())
+        screen_puts(&a->scr, x, 0, clock, a->theme->bar_fg, a->theme->bar_bg, 32);
+}
+
+/* Fits the menus to the screen. They stay above the status bar. */
+static void layout_menus(App *a)
+{
+    menu_layout(&a->menu, a->scr.cols, a->scr.rows - 1);
 }
 
 void app_draw(App *a)
 {
     TextArea ta = sync_view(a);
 
+    layout_menus(a);
     if (a->ed.follow)
         ed_scroll_to_cursor(&a->ed);
     draw_window(a, ta);
@@ -1050,23 +1233,16 @@ static void right_click(App *a, int cx, int cy)
         ed_set_cursor(&a->ed, ln, col, 0);
         a->ed.follow = 0;
     }
-    menu_popup(&a->menu, cx, cy, a->scr.cols, a->scr.rows);
+    menu_popup(&a->menu, cx, cy);
 }
 
 /* The Menu key or Shift+F10 opens the context menu below the text cursor,
  * scrolling it into view first. */
 static void cursor_popup(App *a)
 {
-    TextArea ta = text_area(a);
-    Editor *ed = &a->ed;
-    size_t len;
-    const char *l = ed_line(ed, ed->cy, &len);
-    long dc;
-
-    ed_scroll_to_cursor(ed);
-    dc = ed_disp_col(ed, l, len, ed->cx) - ed->left;
-    menu_popup(&a->menu, ta.x + (int)dc, ta.y + (int)(ed->cy - ed->top) + 1,
-               a->scr.cols, a->scr.rows);
+    int cx, cy;
+    cursor_cell(a, &cx, &cy);
+    menu_popup(&a->menu, cx, cy + 1);
 }
 
 static void mouse_down(App *a, const SDL_MouseButtonEvent *b)
@@ -1165,8 +1341,10 @@ static void mouse_wheel(App *a, const SDL_MouseWheelEvent *w)
         dlg_wheel(&a->dlg, -dy * 3);
         return;
     }
-    if (a->menu.open >= 0)
+    if (a->menu.open >= 0) {
+        menu_wheel(&a->menu, -dy * 3);
         return;
+    }
     if (mod & KMOD_SHIFT) {
         dx = dy;
         dy = 0;
@@ -1205,6 +1383,7 @@ static void editor_key(App *a, const SDL_KeyboardEvent *k)
         case SDLK_h: command(a, CMD_REPLACE); return;
         case SDLK_g: command(a, CMD_GOTO); return;
         case SDLK_l: command(a, CMD_LINENUM); return;
+        case SDLK_p: command(a, CMD_FILES); return;
         case SDLK_INSERT: command(a, CMD_COPY); return;
         case SDLK_MINUS:
         case SDLK_KP_MINUS: set_size(a, a->scr.size - 1); return;
@@ -1287,6 +1466,7 @@ static void window_event(App *a, const SDL_WindowEvent *w)
     case SDL_WINDOWEVENT_SIZE_CHANGED:
     case SDL_WINDOWEVENT_RESIZED:
         screen_layout(&a->scr);
+        layout_menus(a);
         a->ed.follow = 1;
         break;
     case SDL_WINDOWEVENT_EXPOSED:
@@ -1382,6 +1562,7 @@ void app_tick(App *a)
         a->blink_on = !a->blink_on;
         a->blink_next = t + BLINK_MS;
     }
+    menu_tick(&a->menu, t);
     /* keep selecting while dragging past the top or bottom edge */
     if (a->drag == 1) {
         TextArea ta = text_area(a);
@@ -1401,6 +1582,8 @@ int app_timeout(App *a)
         return 40;
     if (a->msg_until > t && a->msg_until < next)
         next = a->msg_until;
+    if (a->menu.tick_item >= 0 && a->menu.tick_next < next)
+        next = a->menu.tick_next;
     if (t + clock_ms < next)
         next = t + clock_ms;
     return next > t ? (int)(next - t) : 0;
@@ -1443,6 +1626,7 @@ int app_init(App *a, int argc, char **argv)
 void app_quit(App *a)
 {
     dlg_close(&a->dlg);
+    menu_list_clear(&a->menu);
     ed_free(&a->ed);
     screen_quit(&a->scr);
 }

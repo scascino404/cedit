@@ -86,6 +86,7 @@ Settings are changed from the menus and remembered across sessions in
 | `Ctrl+A` | Select all |
 | `Shift` + movement, mouse drag | Select (double-click: word, triple-click: line) |
 | Right-click, `Menu` key or `Shift+F10` | Context menu (Undo, Cut, Copy, Paste, Delete, Select All) |
+| `Ctrl+P` (View → Files in Directory) | Pop up the folders and files in the current file's directory and open one. `Right` / `Left` open and close folders |
 | `Ctrl+Left` / `Ctrl+Right` | Previous / next word |
 | `Ctrl+Up` / `Ctrl+Down` | Scroll without moving the cursor |
 | `Home` / `End`, `Ctrl+Home` / `Ctrl+End` | Line start (smart) / end, file start / end |
@@ -110,7 +111,7 @@ Settings are changed from the menus and remembered across sessions in
 | `src/editor.c` | Cursor, selection, edit commands, search/replace. No SDL code |
 | `src/screen.c` | A text-mode cell grid with box and label drawing. Only changed cells are rasterized, and the image is scaled up by integer factors |
 | `src/ui.c` | The application: commands, the concrete dialogs, the editor window, input handling |
-| `src/menu.c` | The menu tables (every command with its label and shortcut), menu drawing and navigation |
+| `src/menu.c` | The menu tables (every command with its label and shortcut), menu drawing and navigation, and the scrolling tree menu for files |
 | `src/dialog.c` | Generic dialog boxes: labels, input fields, checkboxes, buttons and a list box |
 | `src/theme.c` | The light and dark color themes |
 | `src/font8x8.c`, `src/font8x16.c` | The two hand-drawn fonts, as ASCII art |
@@ -171,6 +172,7 @@ make tools
 build/fontsheet 16 4 sheet.ppm            # render a font sample sheet
 SDL_VIDEODRIVER=offscreen build/uishot shot file.txt k:F10 s
                                           # drive the UI headlessly, save screenshots
+                                          # (tokens are listed in tests/uishot.c)
 ```
 
 `uishot` never reads or writes your settings file.

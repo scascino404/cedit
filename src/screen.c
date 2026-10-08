@@ -212,19 +212,6 @@ void screen_frame(Screen *s, int x, int y, int w, int h, int dbl, int fg, int bg
     }
 }
 
-void screen_shadow(Screen *s, int x, int y, int w, int h)
-{
-    int i, j;
-    for (j = y; j < y + h; j++)
-        for (i = x; i < x + w; i++) {
-            Cell *c = screen_cell(s, i, j);
-            if (c) {
-                c->fg = DARKGRAY;
-                c->bg = BLACK;
-            }
-        }
-}
-
 void screen_cursor(Screen *s, int x, int y, int shape)
 {
     Cell *c = screen_cell(s, x, y);

@@ -53,8 +53,8 @@ void dlg_begin(Dialog *d, int kind, const char *title, int w, int h)
     memset(d, 0, sizeof *d);
     d->kind = kind;
     str_copy(d->title, sizeof d->title, title);
-    d->w = w;
-    d->h = h;
+    d->w = d->max_w = d->min_w = w;
+    d->h = d->max_h = d->min_h = h;
     d->focus = -1;
 }
 
@@ -82,12 +82,16 @@ Widget *dlg_add(Dialog *d, int kind, int id, int x, int y, int w,
     return wd;
 }
 
-void dlg_buttons(Dialog *d, int y, const int *ids, const char *const *labels,
-                 int n)
+/* Centers the buttons in the dialog's width, closer together if they
+ * need to be. */
+static void center_buttons(Dialog *d)
 {
-    int i, total = 0, x, gap = 2;
-    for (i = 0; i < n; i++)
-        total += label_width(labels[i]) + 4 + (i ? gap : 0);
+    int i, n = 0, total = 0, x, gap = 2;
+    for (i = 0; i < d->n; i++)
+        if (d->wd[i].kind == W_BUTTON) {
+            total += d->wd[i].w + (n ? gap : 0);
+            n++;
+        }
     if (total > d->w - 2) {         /* narrow screen: tighter spacing */
         total -= n - 1;
         gap = 1;
@@ -95,10 +99,20 @@ void dlg_buttons(Dialog *d, int y, const int *ids, const char *const *labels,
     x = (d->w - total) / 2;
     if (x < 1)
         x = 1;
-    for (i = 0; i < n; i++) {
-        Widget *b = dlg_add(d, W_BUTTON, ids[i], x, y, 0, labels[i]);
-        x += b->w + gap;
-    }
+    for (i = 0; i < d->n; i++)
+        if (d->wd[i].kind == W_BUTTON) {
+            d->wd[i].x = x;
+            x += d->wd[i].w + gap;
+        }
+}
+
+void dlg_buttons(Dialog *d, int y, const int *ids, const char *const *labels,
+                 int n)
+{
+    int i;
+    for (i = 0; i < n; i++)
+        dlg_add(d, W_BUTTON, ids[i], 0, y, 0, labels[i]);
+    center_buttons(d);
 }
 
 Widget *dlg_find(Dialog *d, int id)
@@ -233,11 +247,39 @@ static int list_step(const Dialog *d, SDL_Keycode sym)
 /* drawing                                                             */
 /* ------------------------------------------------------------------ */
 
+/* Changes the dialog's size, moving and stretching what follows its edges. */
+static void resize(Dialog *d, int w, int h)
+{
+    int i, dw = w - d->w, dh = h - d->h;
+    for (i = 0; i < d->n; i++) {
+        Widget *wd = &d->wd[i];
+        if (wd->stretch)
+            wd->w += dw;
+        if (wd->kind == W_BUTTON)
+            wd->y += dh;
+    }
+    d->list_w += dw;
+    d->list_h += dh;
+    d->w = w;
+    d->h = h;
+    center_buttons(d);
+}
+
+/* Sizes the dialog to fit the screen, between its smallest and full size,
+ * and centers it (or puts it above the status bar). */
 static void place(Dialog *d, const Screen *s)
 {
-    if (d->w > s->cols - 2)
-        d->w = s->cols - 2;
+    int w = d->max_w < s->cols - 4 ? d->max_w : s->cols - 4;
+    int h = d->max_h < s->rows - 4 ? d->max_h : s->rows - 4;
+    if (w < d->min_w)
+        w = d->min_w;
+    if (h < d->min_h)
+        h = d->min_h;
+    if (w != d->w || h != d->h)
+        resize(d, w, h);
     d->x = (s->cols - d->w) / 2;
+    if (d->x < 0)
+        d->x = 0;
     d->y = d->at_bottom ? s->rows - d->h - 2 : (s->rows - d->h) / 2;
     if (d->y < 1)
         d->y = 1;
@@ -366,8 +408,6 @@ void dlg_draw(Dialog *d, Screen *s, const Theme *t, int blink_on)
     str_cat(title, sizeof title, " ");
     tw = utf8_width(title);
     screen_puts(s, d->x + (d->w - tw) / 2, d->y, title, t->title_fg, t->title_bg, tw);
-    screen_shadow(s, d->x + d->w, d->y + 1, 2, d->h);
-    screen_shadow(s, d->x + 2, d->y + d->h, d->w - 2, 1);
 
     for (i = 0; i < d->n; i++)
         draw_widget(d, s, t, &d->wd[i], i == d->focus, blink_on);

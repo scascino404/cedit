@@ -20,7 +20,8 @@ typedef struct App {
     int alt_tap;            /* Alt pressed alone: toggles the menu on release */
 
     Dialog dlg;
-    char dir[4096];         /* directory shown by the file dialogs */
+    char dir[4096];         /* directory shown by the file dialogs, and the
+                               top of the file menu */
     char overwrite[4096];   /* existing file the user agreed to replace */
     int pending;            /* action waiting for "save changes?" */
     char pending_path[4096];

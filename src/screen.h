@@ -72,8 +72,6 @@ void screen_fill(Screen *s, int x, int y, int w, int h, unsigned long ch,
                  int fg, int bg);
 /* A single or double line box. */
 void screen_frame(Screen *s, int x, int y, int w, int h, int dbl, int fg, int bg);
-/* Darkens the cells under a drop shadow. */
-void screen_shadow(Screen *s, int x, int y, int w, int h);
 void screen_cursor(Screen *s, int x, int y, int shape);
 
 /* Labels mark their hotkey letter with '&', as in "&Open". screen_label

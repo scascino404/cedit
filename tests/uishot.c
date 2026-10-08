@@ -6,6 +6,8 @@
  *                d:<col>,<row> (double click) r:<col>,<row> (right click)
  *                w:<n> (wheel) s (screenshot)
  *                m:<col>,<row> (move the mouse there)
+ *                p:<ms> (wait, running the app's timers)
+ *                z:<w>x<h> (resize the window, in window units)
  */
 #define _XOPEN_SOURCE 700
 #include "../src/ui.h"
@@ -129,6 +131,25 @@ int main(int argc, char **argv)
             memset(&e, 0, sizeof e);
             e.type = SDL_MOUSEWHEEL;
             e.wheel.y = atoi(t + 2);
+            app_event(&app, &e);
+            frame();
+        } else if (t[0] == 'p' && t[1] == ':') {
+            Uint32 end = SDL_GetTicks() + (Uint32)atoi(t + 2);
+            while (!SDL_TICKS_PASSED(SDL_GetTicks(), end)) {
+                SDL_Delay(10);
+                app_tick(&app);
+            }
+            frame();
+        } else if (t[0] == 'z' && t[1] == ':') {
+            SDL_Event e;
+            int w, h;
+            sscanf(t + 2, "%dx%d", &w, &h);
+            SDL_SetWindowSize(app.scr.win, w, h);
+            memset(&e, 0, sizeof e);
+            e.type = SDL_WINDOWEVENT;
+            e.window.event = SDL_WINDOWEVENT_SIZE_CHANGED;
+            e.window.data1 = w;
+            e.window.data2 = h;
             app_event(&app, &e);
             frame();
         } else if (t[0] == 's' && !t[1]) shot();

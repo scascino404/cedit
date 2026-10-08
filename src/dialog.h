@@ -33,11 +33,15 @@ typedef struct Widget {
     char text[FIELD_MAX];
     size_t len, cur;
     int checked;
+    int stretch;            /* widens and narrows with the dialog */
 } Widget;
 
 typedef struct Dialog {
     int kind;
-    int x, y, w, h;         /* x and y are placed by dlg_draw() */
+    int x, y, w, h;         /* placed and sized by dlg_draw() */
+    int max_w, max_h;       /* the size it was built at, and the smallest it */
+    int min_w, min_h;       /* shrinks to on a small screen (the same unless
+                               the owner lowers them) */
     int at_bottom;          /* sit above the status bar, not centered */
     char title[64];
     Widget wd[24];
@@ -48,18 +52,22 @@ typedef struct Dialog {
                                selection moves; the owner clears it */
 
     /* List box rows, when list_h > 0. Items ending in '/' are drawn as
-     * directories. With sel < 0 the list only scrolls. */
+     * directories. With sel < 0 the list only scrolls. The list grows and
+     * shrinks with the dialog, and so does the row of buttons' position,
+     * which stays centered at the bottom. */
     int list_x, list_y, list_w, list_h, list_frame;
     int list_field;         /* id of a field that mirrors the selection */
     char **items;
     int nitems, sel, scroll;
 } Dialog;
 
+/* Starts a dialog laid out for w x h cells, at most. */
 void dlg_begin(Dialog *d, int kind, const char *title, int w, int h);
 void dlg_close(Dialog *d);
 Widget *dlg_add(Dialog *d, int kind, int id, int x, int y, int w,
                 const char *label);
-/* Adds a centered row of buttons. */
+/* Adds a centered row of buttons, which stays on the dialog's bottom row
+ * of widgets (h - 3) when it is resized. */
 void dlg_buttons(Dialog *d, int y, const int *ids, const char *const *labels,
                  int n);
 Widget *dlg_find(Dialog *d, int id);
