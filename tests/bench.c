@@ -10,10 +10,10 @@
  * the scenarios whose name starts with it ("log" runs log.open, log.find,
  * log.replace and log.edit).
  *
- * The files are generated into dir (build/bench-data) on first use: C and
- * Markdown from the sources in dir/seed (the Makefile extracts them from a
- * pinned commit, so they don't change as the code does), and synthetic logs
- * and JSON. They take about 1.3 GB.
+ * The files are generated into dir (build/bench-data) on first use: C,
+ * Markdown, logs and JSON, made up from word lists with a fixed random
+ * seed, so they are the same on every machine and don't change as the code
+ * does. They take about 1.3 GB.
  *
  * Frames are timed from the input event to the end of drawing, as the main
  * loop does them (event, app_tick, app_draw). Searches, Replace All, saves
@@ -34,7 +34,6 @@
 #include "../src/syntax.h"
 #include "../src/util.h"
 
-#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -395,7 +394,7 @@ static void sc_startup(void)
     stop();
 }
 
-/* Opening and closing an everyday source file (editor.c, 30 KB). */
+/* Opening and closing an everyday source file (30 KB). */
 static void sc_small(void)
 {
     Samples o = {0}, c = {0};
@@ -836,75 +835,263 @@ static int exists(const char *name)
     return stat(path, &st) == 0;
 }
 
-static char *slurp(const char *path, size_t *n)
+/* Words that the generated C and Markdown are made of. */
+static const char *const c_names[] = {
+    "len", "n", "i", "pos", "buf", "line", "text", "node", "cap", "size",
+    "off", "count", "first", "last", "next", "key", "flags", "width"
+};
+static const char *const c_types[] = {
+    "int", "long", "size_t", "char *", "const char *", "unsigned", "double",
+    "Node *"
+};
+static const char *const c_verbs[] = {
+    "find", "insert", "delete", "split", "merge", "load", "save", "count",
+    "scan", "copy", "move", "draw", "parse", "free"
+};
+static const char *const c_nouns[] = {
+    "line", "node", "word", "leaf", "row", "cell", "span", "block", "table",
+    "entry", "range", "file"
+};
+static const char *const prose[] = {
+    "the", "a", "of", "to", "and", "in", "is", "it", "that", "for", "on",
+    "with", "as", "each", "line", "text", "file", "buffer", "cursor",
+    "window", "screen", "menu", "key", "byte", "cell", "font", "search",
+    "edit", "undo", "save", "load", "first", "last", "next", "end", "start",
+    "row", "column", "width", "size", "when", "until", "after", "before",
+    "keeps", "moves", "finds", "draws", "returns", "counts", "grows"
+};
+
+#define PICK(a) ((a)[rnd(sizeof (a) / sizeof *(a))])
+
+/* n words of prose, as in comments and documentation. */
+static void put_words(FILE *f, int n)
 {
-    FILE *f = fopen(path, "rb");
-    char *d;
-    long len;
-    if (!f) {
-        fprintf(stderr, "bench: %s: %s (run make bench)\n", path, strerror(errno));
-        exit(1);
-    }
-    fseek(f, 0, SEEK_END);
-    len = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    d = (char *)malloc((size_t)len + 1);
-    *n = fread(d, 1, (size_t)len, f);
-    fclose(f);
-    return d;
+    int i;
+    for (i = 0; i < n; i++)
+        fprintf(f, "%s%s", i ? " " : "", PICK(prose));
 }
 
-/* Writes text repeated to about size bytes, in whole copies. */
-static void repeat(const char *name, const char *text, size_t n, size_t size)
+/* A declaration of name as type, with the '*' against the name. */
+static void put_decl(FILE *f, const char *type, const char *name)
+{
+    fprintf(f, "%s%s%s", type, type[strlen(type) - 1] == '*' ? "" : " ", name);
+}
+
+/* n C statements at an indent of depth levels, some of them blocks with
+ * statements of their own. */
+static void put_stmts(FILE *f, int depth, int n)
+{
+    while (n-- > 0) {
+        fprintf(f, "%*s", depth * 4, "");
+        switch (rnd(depth < 3 ? 10 : 5)) {
+        case 0:
+        case 1:
+            fprintf(f, "%s = %s + %lu;\n", PICK(c_names), PICK(c_names), rnd(16));
+            break;
+        case 2:
+            fprintf(f, "%s_%s(%s, %s);\n", PICK(c_verbs), PICK(c_nouns),
+                    PICK(c_names), PICK(c_names));
+            break;
+        case 3:
+            fprintf(f, "printf(\"");
+            put_words(f, 2 + (int)rnd(10));
+            fprintf(f, ": %%d\\n\", %s);\n", PICK(c_names));
+            break;
+        case 4:
+            fprintf(f, "/* ");
+            put_words(f, 3 + (int)rnd(8));
+            fprintf(f, " */\n");
+            break;
+        case 5:
+            fprintf(f, "if (%s[%s] == '%c')\n", PICK(c_names), PICK(c_names),
+                    (int)('a' + rnd(26)));
+            put_stmts(f, depth + 1, 1);
+            break;
+        case 6:
+        case 7:
+            fprintf(f, "if (%s < %s) {\n", PICK(c_names), PICK(c_names));
+            put_stmts(f, depth + 1, 1 + (int)rnd(4));
+            if (rnd(3) == 0) {
+                fprintf(f, "%*s} else {\n", depth * 4, "");
+                put_stmts(f, depth + 1, 1 + (int)rnd(3));
+            }
+            fprintf(f, "%*s}\n", depth * 4, "");
+            break;
+        case 8:
+            fprintf(f, "for (i = 0; i < %s; i++) {\n", PICK(c_names));
+            put_stmts(f, depth + 1, 1 + (int)rnd(4));
+            fprintf(f, "%*s}\n", depth * 4, "");
+            break;
+        default:
+            fprintf(f, "while (%s && %s->%s != NULL) {\n", PICK(c_names),
+                    PICK(c_names), PICK(c_names));
+            put_stmts(f, depth + 1, 1 + (int)rnd(4));
+            fprintf(f, "%*s}\n", depth * 4, "");
+            break;
+        }
+    }
+}
+
+/* The top of a source file: a comment, includes, a macro, a struct and a
+ * table of strings. */
+static void put_c_header(FILE *f)
+{
+    const char *noun = PICK(c_nouns);
+    char up[16];
+    int i;
+
+    for (i = 0; noun[i]; i++)
+        up[i] = (char)(noun[i] - 'a' + 'A');
+    up[i] = 0;
+    fprintf(f, "/*\n * %s.c - ", noun);
+    put_words(f, 4 + (int)rnd(6));
+    fprintf(f, "\n * ");
+    put_words(f, 8 + (int)rnd(6));
+    fprintf(f, ".\n */\n#include \"%s.h\"\n\n#include <stdio.h>\n"
+               "#include <string.h>\n\n#define MAX_%s %lu\n\n", noun, up, 1 + rnd(4096));
+    fprintf(f, "typedef struct %c%s {\n", up[0], noun + 1);
+    for (i = 1 + (int)rnd(5); i > 0; i--) {
+        fprintf(f, "    ");
+        put_decl(f, PICK(c_types), PICK(c_names));
+        fprintf(f, ";\n");
+    }
+    fprintf(f, "} %c%s;\n\nstatic const char *const %s_names[] = {\n", up[0],
+            noun + 1, noun);
+    for (i = 2 + (int)rnd(4); i > 0; i--)
+        fprintf(f, "    \"%s\", \"%s\", \"%s\",\n", PICK(prose), PICK(prose),
+                PICK(prose));
+    fprintf(f, "    NULL\n};\n\n");
+}
+
+/* A function with a comment above it. */
+static void put_function(FILE *f)
+{
+    int i;
+
+    fprintf(f, "/* ");
+    put_words(f, 6 + (int)rnd(10));
+    fprintf(f, ". */\nstatic ");
+    put_decl(f, PICK(c_types), PICK(c_verbs));
+    fprintf(f, "_%s(", PICK(c_nouns));
+    for (i = 1 + (int)rnd(3); i > 0; i--) {
+        put_decl(f, PICK(c_types), PICK(c_names));
+        fprintf(f, i > 1 ? ", " : ")\n{\n");
+    }
+    for (i = 1 + (int)rnd(3); i > 0; i--) {
+        fprintf(f, "    ");
+        put_decl(f, PICK(c_types), PICK(c_names));
+        fprintf(f, ", %s;\n", PICK(c_names));
+    }
+    fprintf(f, "\n");
+    put_stmts(f, 1, 3 + (int)rnd(8));
+    fprintf(f, "    return %s;\n}\n\n", PICK(c_names));
+}
+
+/* C sources of about size bytes: a file's top, then a dozen functions,
+ * over and over. */
+static void gen_code(const char *name, size_t size, unsigned long seed)
 {
     FILE *f = create(name);
-    size_t done;
-    for (done = 0; done < size; done += n)
-        fwrite(text, 1, n, f);
+    long k;
+
+    rng = seed;
+    for (k = 0; (size_t)ftell(f) < size; k++) {
+        if (k % 12 == 0)
+            put_c_header(f);
+        put_function(f);
+    }
     fclose(f);
 }
 
-static int cmp_str(const void *a, const void *b)
+/* A paragraph wrapped at 72 columns, with inline code, bold text and
+ * links. */
+static void put_paragraph(FILE *f, int words)
 {
-    return strcmp(*(char *const *)a, *(char *const *)b);
+    int col = 0, i;
+
+    for (i = 0; i < words; i++) {
+        char w[96];
+        unsigned long k = rnd(100);
+        if (k < 4)
+            sprintf(w, "`%s_%s()`", PICK(c_verbs), PICK(c_nouns));
+        else if (k < 6)
+            sprintf(w, "**%s %s**", PICK(prose), PICK(prose));
+        else if (k < 8)
+            sprintf(w, "[%s](https://example.com/%s)", PICK(prose), PICK(c_nouns));
+        else
+            strcpy(w, PICK(prose));
+        if (col > 0 && col + 1 + (int)strlen(w) > 72) {
+            fputc('\n', f);
+            col = 0;
+        }
+        col += fprintf(f, "%s%s", col ? " " : "", w);
+    }
+    fprintf(f, ".\n\n");
 }
 
-/* The seed's C sources (not the font tables, which are mostly ASCII art in
- * strings), in name order, concatenated. */
-static char *seed_code(size_t *n)
+/* A section of a document: a heading, then paragraphs, a list, a code
+ * block, a table or a quote. */
+static void put_section(FILE *f)
 {
-    char dir[4096], path[4096], *names[64], *all = NULL;
-    DIR *d;
-    struct dirent *e;
-    int k = 0, i;
+    int i, n;
 
-    sprintf(dir, "%s/seed/src", data);
-    d = opendir(dir);
-    if (!d) {
-        fprintf(stderr, "bench: %s: %s (run make bench)\n", dir, strerror(errno));
-        exit(1);
+    fprintf(f, "## ");
+    put_words(f, 2 + (int)rnd(4));
+    fprintf(f, "\n\n");
+    for (n = 2 + (int)rnd(4); n > 0; n--) {
+        switch (rnd(6)) {
+        case 0:
+            for (i = 3 + (int)rnd(4); i > 0; i--) {
+                fprintf(f, "- ");
+                put_words(f, 4 + (int)rnd(9));
+                fprintf(f, "\n");
+            }
+            fprintf(f, "\n");
+            break;
+        case 1:
+            fprintf(f, "```c\n");
+            put_stmts(f, 0, 2 + (int)rnd(5));
+            fprintf(f, "```\n\n");
+            break;
+        case 2:
+            fprintf(f, "| Keys | Action |\n|---|---|\n");
+            for (i = 3 + (int)rnd(4); i > 0; i--) {
+                fprintf(f, "| `Ctrl+%c` | ", (int)('A' + rnd(26)));
+                put_words(f, 2 + (int)rnd(5));
+                fprintf(f, " |\n");
+            }
+            fprintf(f, "\n");
+            break;
+        case 3:
+            fprintf(f, "> ");
+            put_words(f, 8 + (int)rnd(8));
+            fprintf(f, ".\n\n");
+            break;
+        default:
+            put_paragraph(f, 20 + (int)rnd(60));
+            break;
+        }
     }
-    while ((e = readdir(d)) && k < 64) {
-        size_t l = strlen(e->d_name);
-        if (l > 2 && strcmp(e->d_name + l - 2, ".c") == 0 &&
-            strncmp(e->d_name, "font", 4) != 0)
-            names[k++] = strdup(e->d_name);
+}
+
+/* Markdown documents of about size bytes, each a title and a few
+ * sections. */
+static void gen_markdown(const char *name, size_t size, unsigned long seed)
+{
+    FILE *f = create(name);
+    long k;
+
+    rng = seed;
+    for (k = 0; (size_t)ftell(f) < size; k++) {
+        if (k % 8 == 0) {
+            fprintf(f, "# ");
+            put_words(f, 2 + (int)rnd(3));
+            fprintf(f, "\n\n");
+            put_paragraph(f, 30 + (int)rnd(30));
+        }
+        put_section(f);
     }
-    closedir(d);
-    qsort(names, (size_t)k, sizeof *names, cmp_str);
-    *n = 0;
-    for (i = 0; i < k; i++) {
-        size_t m;
-        char *t;
-        sprintf(path, "%s/%s", dir, names[i]);
-        t = slurp(path, &m);
-        all = (char *)realloc(all, *n + m);
-        memcpy(all + *n, t, m);
-        *n += m;
-        free(t);
-        free(names[i]);
-    }
-    return all;
+    fclose(f);
 }
 
 static void gen_log(void)
@@ -976,29 +1163,17 @@ static void gen_json(const char *name, size_t size, int pretty, unsigned long se
 
 static void gen(void)
 {
-    char path[4096];
-    size_t n;
-    char *t;
-
     if (!exists("code.c") || !exists("big.c") || !exists("small.c")) {
         printf("generating code.c, big.c, small.c\n");
         fflush(stdout);
-        t = seed_code(&n);
-        repeat("code.c", t, n, (size_t)8 << 20);
-        repeat("big.c", t, n, (size_t)256 << 20);
-        free(t);
-        sprintf(path, "%s/seed/src/editor.c", data);
-        t = slurp(path, &n);
-        repeat("small.c", t, n, 1);
-        free(t);
+        gen_code("small.c", (size_t)30 << 10, 3);
+        gen_code("code.c", (size_t)8 << 20, 4);
+        gen_code("big.c", (size_t)256 << 20, 5);
     }
     if (!exists("docs.md")) {
         printf("generating docs.md\n");
         fflush(stdout);
-        sprintf(path, "%s/seed/README.md", data);
-        t = slurp(path, &n);
-        repeat("docs.md", t, n, (size_t)8 << 20);
-        free(t);
+        gen_markdown("docs.md", (size_t)8 << 20, 6);
     }
     if (!exists("huge.log")) {
         printf("generating huge.log\n");
