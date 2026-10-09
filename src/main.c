@@ -13,6 +13,20 @@ static int step_key(SDL_Keycode sym)
            sym == SDLK_RIGHT || sym == SDLK_PAGEUP || sym == SDLK_PAGEDOWN;
 }
 
+/* While a window edge is dragged, macOS and Windows hold the main loop
+ * until the mouse is released and stretch the last frame to the window,
+ * distorting the text. An event watch still sees each resize: draw there. */
+static int SDLCALL resize_watch(void *data, SDL_Event *e)
+{
+    App *app = (App *)data;
+    if (e->type == SDL_WINDOWEVENT &&
+        e->window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+        app_event(app, e);
+        app_draw(app);
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     static App app;
@@ -32,6 +46,7 @@ int main(int argc, char **argv)
         SDL_Quit();
         return 1;
     }
+    SDL_AddEventWatch(resize_watch, &app);
     while (app.running) {
         app_draw(&app);
         if (SDL_WaitEventTimeout(&e, app_timeout(&app))) {
