@@ -114,7 +114,8 @@ int dir_list(const char *dir, int parent, const char *mark, DirEntry **out)
         }
     }
     sys_dir_close(d);
-    qsort(ents, (size_t)n, sizeof *ents, cmp_entries);
+    if (n)
+        qsort(ents, (size_t)n, sizeof *ents, cmp_entries);
     *out = ents;
     return n;
 }
