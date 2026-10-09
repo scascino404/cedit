@@ -342,7 +342,7 @@ static void find_dialog(App *a, int replace)
     Widget *f;
     int w = 60, y = 3;
     static const int fids[] = {ID_FINDNEXT, ID_CANCEL};
-    static const char *const flabels[] = {"Find &Next", "Cancel"};
+    static const char *const flabels[] = {"Find &Next", "Close"};
     static const int rids[] = {ID_FINDNEXT, ID_REPLACE, ID_REPLALL, ID_CANCEL};
     static const char *const rlabels[] = {"Find &Next", "&Replace", "Replace &All", "Close"};
     long sy, ey;
@@ -739,8 +739,6 @@ static void dialog_button(App *a, int id)
             str_copy(a->ed.repl, sizeof a->ed.repl, w->text);
         if (!a->ed.find[0])
             break;
-        if (d->kind == DLG_FIND)
-            close_dialog(a);
         if (id == ID_REPLACE) {
             finish_loading(a);
             if (!ed_replace(&a->ed))
