@@ -12,7 +12,7 @@ editors of the 80s and 90s.
   <img src="docs/screenshot-dark.png" alt="cedit in dark mode" width="49%">
 </p>
 
-cedit borrows from two places:
+It borrows from two places:
 
 - **[TempleOS](https://templeos.org)**, Terry A. Davis's operating system.
   Its font, black ink on white paper, blue frames and thin arrow pointer
