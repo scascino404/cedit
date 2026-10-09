@@ -32,7 +32,7 @@ It borrows from two places:
 
 ## Build
 
-### Linux / Mac OS
+### Linux / macOS
 
 You need a C compiler, CMake 3.27 or newer, Ninja, and the SDL2 development
 files:
