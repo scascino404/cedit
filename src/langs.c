@@ -79,6 +79,34 @@ static const Rule cpp_rules[] = {
     WORDS(cpp_types, HL_TYPE)
 };
 
+/* ---- HolyC -------------------------------------------------------- */
+
+/* The TempleOS compiler's keywords, but for those only seen after '#' */
+static const char *const holyc_keywords[] = {
+    "argpop", "asm", "break", "case", "catch", "class", "default", "do",
+    "else", "end", "extern", "_extern", "for", "goto", "haserrcode", "if",
+    "import", "_import", "_intern", "interrupt", "lastclass", "lock",
+    "noargpop", "noreg", "no_warn", "offset", "public", "reg", "return",
+    "sizeof", "start", "static", "switch", "try", "union", "while", "TRUE",
+    "FALSE", "NULL", NULL
+};
+static const char *const holyc_types[] = {
+    "U0", "I0", "U8", "I8", "Bool", "U16", "I16", "U32", "I32", "U64", "I64",
+    "F64", "U0i", "I0i", "U8i", "I8i", "U16i", "I16i", "U32i", "I32i", "U64i",
+    "I64i", "F64i", NULL
+};
+/* Comments nest, and strings and char constants ('ABC', up to 8 chars)
+ * may run over several lines. */
+static const Rule holyc_rules[] = {
+    LINE("//", 0, HL_COMMENT),
+    SPAN("/*", "*/", 0, RF_MULTI | RF_NEST, HL_COMMENT),
+    SPAN("\"", "\"", '\\', RF_MULTI, HL_STRING),
+    SPAN("'", "'", '\\', RF_MULTI, HL_STRING),
+    DIRECTIVE("#", HL_PREPROC),
+    WORDS(holyc_keywords, HL_KEYWORD),
+    WORDS(holyc_types, HL_TYPE)
+};
+
 /* ---- Python ------------------------------------------------------- */
 
 static const char *const py_keywords[] = {
@@ -255,6 +283,7 @@ Syntax syn_langs[] = {
     LANG("C", ".c .h", NULL, NULL, 0, SYN_NUMBERS | SYN_DIGITSEP, c_rules),
     LANG("C++", ".cc .cpp .cxx .c++ .hh .hpp .hxx .h++ .ipp", NULL, NULL, 0,
          SYN_NUMBERS | SYN_DIGITSEP, cpp_rules),
+    LANG("HolyC", ".HC .HH .hc", NULL, NULL, 0, SYN_NUMBERS, holyc_rules),
     LANG("Python", ".py .pyw .pyi", "python", NULL, 0, SYN_NUMBERS, py_rules),
     LANG("Shell", ".sh .bash .zsh .ksh .bashrc .bash_profile .bash_logout "
          ".profile .zshrc .zprofile .zshenv PKGBUILD",

@@ -26,7 +26,7 @@ It borrows from two places:
 - Plain typing with the usual `Ctrl` shortcuts.
 - Huge files open at once and never freeze the editor.
 - Split windows, showing different files or the same file in two places.
-- Syntax highlighting for C, C++, Python, Shell, Makefile, JavaScript,
+- Syntax highlighting for C, C++, HolyC, Python, Shell, Makefile, JavaScript,
   TypeScript, JSON, Go, Rust, Lua and Markdown.
 - Light and dark themes, three text sizes, word wrap and line numbers.
 

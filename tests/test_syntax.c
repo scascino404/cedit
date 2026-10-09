@@ -76,6 +76,12 @@ static void test_lexer(void)
     check("a.cpp", "R\"(a \" b\nc)\" class",
                    "ssssssss\nsss.kkkkk");
 
+    /* HolyC: nested comments, multi-line strings, multi-char constants */
+    check("a.HC", "U0 F(I64 x) { /* a /* b */ c */ return 'AB'; }",
+                  "tt...ttt......ccccccccccccccccc.kkkkkk.ssss...");
+    check("a.HC", "#ifaot\n\"a\nb\" switch start: end: F64 y=0b101;",
+                  "pppppp\nss\nss.kkkkkk.kkkkk..kkk..ttt...nnnnn.");
+
     /* Python */
     check("a.py", "def f(): # c\n  \"\"\"doc\n  ' \"\"\" x",
                   "kkk......ccc\n..ssssss\nsssssss..");
@@ -141,6 +147,9 @@ static void test_detect(void)
     expect_lang("/x/y/main.c", NULL, "C");
     expect_lang("a.hpp", NULL, "C++");
     expect_lang("src/Makefile", NULL, "Makefile");
+    expect_lang("Kernel/KMain.HC", NULL, "HolyC");
+    expect_lang("KernelA.HH", NULL, "HolyC");
+    expect_lang("a.hh", NULL, "C++");
     expect_lang("/home/me/.bashrc", NULL, "Shell");
     expect_lang("notes.md", NULL, "Markdown");
     expect_lang("a.txt", NULL, "none");
