@@ -20,7 +20,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define BLINK_MS   530
+#define BLINK_MS   300
 #define MSG_MS     4000
 #define DCLICK_MS  400
 #define LOAD_SLICE ((size_t)32 * 1024 * 1024)

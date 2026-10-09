@@ -236,8 +236,9 @@ catches up.
 
 ### Themes
 
-Light mode is TempleOS's black ink on white paper. Dark mode is white on
-black with the same blue bars and yellow block cursor. Both use the 16-color
+Light mode is TempleOS's black ink on white paper, with a black block
+cursor. Dark mode is white on black with the same blue bars and a white
+block cursor. Both use the 16-color
 VGA palette, with each UI element mapped to a palette color through a theme
 table in `src/theme.c`.
 
