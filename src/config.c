@@ -10,6 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#define mkdir(dir, mode) _mkdir(dir)
+#endif
 
 enum { BOOL, INT, SIZE };
 
@@ -60,8 +64,14 @@ static int parse_value(int type, const char *val)
 static int config_path(char *buf, size_t n, int mkdirs)
 {
     const char *env = getenv("CEDIT_CONFIG");
+#ifdef _WIN32
+    /* %APPDATA%\cedit\cedit.conf */
+    const char *xdg = getenv("APPDATA");
+    const char *home = NULL;
+#else
     const char *xdg = getenv("XDG_CONFIG_HOME");
     const char *home = getenv("HOME");
+#endif
     char dir[4096];
 
     if (env) {

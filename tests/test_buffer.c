@@ -9,8 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
-#include <unistd.h>
+
+#include "testutil.h"
 
 static int failures;
 
@@ -207,8 +207,8 @@ static void test_undo(void)
 
 static void test_load(void)
 {
-    char path[] = "/tmp/cedit-test-XXXXXX";
-    int fd = mkstemp(path);
+    char path[512];
+    int fd = tmp_file(path, sizeof path, "cedit-test");
     size_t n = 3 * 1024 * 1024, i;
     char *data = (char *)malloc(n);
     Buffer *b;
@@ -260,8 +260,8 @@ static void test_load(void)
 
 static void test_crlf(void)
 {
-    char path[] = "/tmp/cedit-test-XXXXXX";
-    int fd = mkstemp(path), is_new;
+    char path[512];
+    int fd = tmp_file(path, sizeof path, "cedit-test"), is_new;
     const char *txt = "one\r\ntwo\r\nthree";
     Buffer *b = buf_new();
     char err[128];

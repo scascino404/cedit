@@ -133,7 +133,12 @@ int main(int argc, char **argv)
         return 1;
     prefix = argv[1];
     if (!getenv("CEDIT_CONFIG"))
+#ifdef _WIN32
+        putenv("CEDIT_CONFIG=NUL");    /* "NAME=" removes NAME there */
+#else
         putenv("CEDIT_CONFIG=");
+#endif
+    SDL_SetMainReady();
     SDL_Init(SDL_INIT_VIDEO);
     if (app_init(&app, 2, argv + 1) < 0) {
         fprintf(stderr, "init: %s\n", SDL_GetError());

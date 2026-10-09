@@ -57,6 +57,24 @@ sudo cmake --install build        # copies it to /usr/local/bin
 The preset builds with clang and Ninja. To use gcc, configure with
 `cmake --preset default -DCMAKE_C_COMPILER=gcc`.
 
+### Windows
+
+You need [Visual Studio](https://visualstudio.microsoft.com/) 2022 or
+later (Community, or just the Build Tools) with the **Desktop development
+with C++** workload. Nothing else: the build downloads SDL2 by itself.
+
+Either open the cedit folder in Visual Studio and build, or run these in a
+**Developer PowerShell for VS**:
+
+```powershell
+cmake -B build
+cmake --build build --config Release    # builds build\Release\cedit.exe
+ctest --test-dir build -C Release       # runs the tests
+```
+
+`cedit.exe` needs only the `SDL2.dll` next to it: copy both wherever you
+like.
+
 ## Run
 
 ```sh
@@ -84,7 +102,7 @@ application menu answers first.
 
 Settings such as dark mode and text size are changed from the View and Edit
 menus, and cedit remembers them, and the window size, in
-`~/.config/cedit/cedit.conf`.
+`~/.config/cedit/cedit.conf` (on Windows, `%APPDATA%\cedit\cedit.conf`).
 
 ## License
 

@@ -7,6 +7,15 @@
 # The editor is build/cedit, the tests and review tools sit next to it.
 # Without the preset, cmake -B build uses the system's default compiler and
 # generator; cmake --preset default -DCMAKE_C_COMPILER=gcc picks gcc instead.
+#
+# On Windows, with Visual Studio (see README.md):
+#   cmake -B build
+#   cmake --build build --config Release    builds build/Release/cedit.exe
+#   ctest --test-dir build -C Release
+# SDL2 is the one CMake finds (SDL2_DIR chooses one) or else the official
+# package for Visual C++, downloaded into the build directory. SDL2.dll is
+# copied next to the programs, and is all cedit.exe needs: the C runtime is
+# linked in.
 cmake_minimum_required(VERSION 3.27)
 
 project(cedit C)
@@ -19,16 +28,55 @@ endif()
 # for clangd / VSCode IntelliSense: build/compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Visual C++, or clang for its ABI (not MinGW)
+if(WIN32 AND NOT MINGW)
+    set(msvc_abi ON)
+endif()
+
 set(CMAKE_C_STANDARD 90)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+if(NOT msvc_abi)
+    # (clang's intrin.h, which SDL.h includes there, needs inline)
+    set(CMAKE_C_EXTENSIONS OFF)
+endif()
 
 # linked into every target below
 add_library(cedit_warnings INTERFACE)
-target_compile_options(cedit_warnings INTERFACE
-    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-pedantic -Wall -Wextra -Wno-overlength-strings>)
+if(MSVC)
+    target_compile_options(cedit_warnings INTERFACE /W4)
+else()
+    target_compile_options(cedit_warnings INTERFACE
+        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-pedantic -Wall -Wextra -Wno-overlength-strings>)
+endif()
 
-find_package(SDL2 REQUIRED CONFIG)
+if(WIN32)
+    # each program's main is its entry point, not SDL2main's WinMain
+    add_compile_definitions(SDL_MAIN_HANDLED)
+endif()
+if(msvc_abi)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+find_package(SDL2 CONFIG QUIET)
+if(NOT SDL2_FOUND AND msvc_abi)
+    set(SDL2_VERSION 2.32.10)
+    set(SDL2_SHA256 af347939395a58b365846aaea27391e69f9ec9d4dd650d6ac40802159b418a6e)
+    set(sdl_dir ${CMAKE_BINARY_DIR}/_deps/SDL2-${SDL2_VERSION})
+    if(NOT EXISTS ${sdl_dir}/cmake/sdl2-config.cmake)
+        set(sdl_zip ${CMAKE_BINARY_DIR}/_deps/SDL2-devel-${SDL2_VERSION}-VC.zip)
+        message(STATUS "Downloading SDL2 ${SDL2_VERSION}")
+        file(DOWNLOAD
+             https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-VC.zip
+             ${sdl_zip} EXPECTED_HASH SHA256=${SDL2_SHA256})
+        file(ARCHIVE_EXTRACT INPUT ${sdl_zip} DESTINATION ${CMAKE_BINARY_DIR}/_deps)
+        file(REMOVE ${sdl_zip})
+    endif()
+    find_package(SDL2 CONFIG REQUIRED PATHS ${sdl_dir} NO_DEFAULT_PATH)
+elseif(NOT SDL2_FOUND)
+    message(FATAL_ERROR "SDL2 not found: install its development files "
+                        "(see README.md), or set SDL2_DIR")
+endif()
 
 # The editing core links without SDL (its headers only need SDL's types),
 # so the tests that use only it don't link SDL either.
@@ -48,10 +96,27 @@ target_link_libraries(cedit_ui
     PUBLIC cedit_core SDL2::SDL2
     PRIVATE cedit_warnings)
 
-add_executable(cedit src/main.c)
+add_executable(cedit WIN32 src/main.c)
 target_link_libraries(cedit PRIVATE cedit_ui cedit_warnings)
 
 install(TARGETS cedit)
+
+if(WIN32)
+    # every program takes and gives file names in UTF-8 (see the manifest)
+    target_sources(cedit_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/cedit.manifest)
+    if(msvc_abi)
+        # main, not WinMain (MinGW calls main anyway)
+        target_link_options(cedit PRIVATE "LINKER:/ENTRY:mainCRTStartup")
+    endif()
+    # SDL2.dll next to the programs, which are all next to cedit
+    get_target_property(sdl_type SDL2::SDL2 TYPE)
+    if(sdl_type STREQUAL "SHARED_LIBRARY")
+        add_custom_command(TARGET cedit POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:SDL2::SDL2> $<TARGET_FILE_DIR:cedit>)
+        install(FILES $<TARGET_FILE:SDL2::SDL2> TYPE BIN)
+    endif()
+endif()
 
 # tests
 enable_testing()

@@ -30,6 +30,8 @@ static Doc *doc_new(Buffer *b, const char *path)
     d->buf = b;
     undo_init(&d->undo);
     d->path = path ? xstrdup(path) : NULL;
+    if (d->path)
+        fix_slashes(d->path);
     return d;
 }
 
@@ -189,6 +191,7 @@ void ed_set_saved(Editor *ed, const char *path)
 {
     Doc *d = ed->doc;
     char *p = xstrdup(path);    /* path may be d->path itself */
+    fix_slashes(p);
     undo_mark_saved(&d->undo);
     d->last_kind = K_NONE;
     free(d->path);

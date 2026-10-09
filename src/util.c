@@ -61,3 +61,14 @@ int mem_match(const char *a, const char *b, size_t n, int icase)
             return 0;
     return 1;
 }
+
+void fix_slashes(char *path)
+{
+#ifdef _WIN32
+    for (; *path; path++)
+        if (*path == '\\')
+            *path = '/';
+#else
+    (void)path;
+#endif
+}

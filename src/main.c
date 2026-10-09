@@ -27,22 +27,45 @@ static int SDLCALL resize_watch(void *data, SDL_Event *e)
     return 0;
 }
 
+/* Tells the user about a failure to start, or about the usage. A Windows
+ * program that has a window has no console to print to. */
+static void report(const char *msg, int error)
+{
+#ifdef _WIN32
+    SDL_ShowSimpleMessageBox(error ? SDL_MESSAGEBOX_ERROR : SDL_MESSAGEBOX_INFORMATION,
+                             "cedit", msg, NULL);
+#else
+    if (error)
+        fprintf(stderr, "cedit: %s\n", msg);
+    else
+        puts(msg);
+#endif
+}
+
 int main(int argc, char **argv)
 {
     static App app;
     SDL_Event e;
     SDL_Keysym last;
 
+    /* main is the entry point on Windows too, not SDL2main's (see
+     * CMakeLists.txt) */
+    SDL_SetMainReady();
     if (argc > 1 && (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)) {
-        puts("usage: cedit [file]");
+        report("usage: cedit [file]", 0);
         return 0;
     }
+#ifdef _WIN32
+    /* window sizes in units the display scale is applied to, as on macOS,
+     * rather than a window the system stretches, which blurs the text */
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "1");
+#endif
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        fprintf(stderr, "cedit: %s\n", SDL_GetError());
+        report(SDL_GetError(), 1);
         return 1;
     }
     if (app_init(&app, argc, argv) < 0) {
-        fprintf(stderr, "cedit: %s\n", SDL_GetError());
+        report(SDL_GetError(), 1);
         SDL_Quit();
         return 1;
     }

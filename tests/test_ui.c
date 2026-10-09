@@ -11,14 +11,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <dirent.h>
-#include <unistd.h>
+#endif
+
+#include "testutil.h"
 
 #define LINES 4000000L      /* of 32 bytes: 128 MB */
 
 static App app;
 static int failures;
-static char path[] = "/tmp/cedit-ui-XXXXXX";
+static char path[512];
 
 #define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); \
     failures++; } } while (0)
@@ -81,8 +84,8 @@ static void line_text(char *out, long ln)
 
 static void make_file(void)
 {
-    int fd = mkstemp(path);
-    FILE *f = fdopen(fd, "w");
+    int fd = tmp_file(path, sizeof path, "cedit-ui");
+    FILE *f = fdopen(fd, "wb");
     char l[64];
     long i;
     for (i = 0; i < LINES; i++) {
@@ -316,7 +319,7 @@ static void test_replace_all(void)
 /* The saved file is the text with "X" in front. */
 static void check_saved(void)
 {
-    FILE *f = fopen(path, "r");
+    FILE *f = fopen(path, "rb");
     char l[64], want[64];
     long i = 0;
     int ok = f != NULL;
@@ -333,15 +336,29 @@ static void check_saved(void)
 /* Whether a save left a temporary file next to the file. */
 static int temp_left(void)
 {
-    DIR *d = opendir("/tmp");
+    const char *base = strrchr(path, '/') + 1;
+    int dlen = (int)(base - 1 - path), found = 0;
+#ifdef _WIN32
+    char pattern[512];
+    struct _finddata_t f;
+    intptr_t h;
+    sprintf(pattern, "%.*s/.%s.cedit-*", dlen, path, base);
+    h = _findfirst(pattern, &f);
+    found = h != -1;
+    if (found)
+        _findclose(h);
+#else
+    char dir[512], name[64];
+    DIR *d;
     struct dirent *e;
-    char name[64];
-    int found = 0;
-    sprintf(name, ".%s.cedit-", path + 5);
+    sprintf(dir, "%.*s", dlen, path);
+    sprintf(name, ".%s.cedit-", base);
+    d = opendir(dir);
     while (d && (e = readdir(d)) != NULL)
         found |= strncmp(e->d_name, name, strlen(name)) == 0;
     if (d)
         closedir(d);
+#endif
     return found;
 }
 
@@ -392,7 +409,7 @@ int main(void)
 {
     char *argv[2];
 
-    putenv("CEDIT_CONFIG=");
+    putenv(NO_CONFIG);
     /* not offscreen: on macOS SDL gives its windows OpenGL there, which
      * it then can't load (no EGL), and dummy draws the same */
     if (!getenv("SDL_VIDEODRIVER"))
@@ -400,6 +417,7 @@ int main(void)
     make_file();
     argv[0] = "test_ui";
     argv[1] = NULL;
+    SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO) < 0 || app_init(&app, 1, argv) < 0) {
         printf("test_ui: %s\n", SDL_GetError());
         unlink(path);

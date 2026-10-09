@@ -1,3 +1,6 @@
 build/
 references/
 CMakeUserPresets.json
+# Visual Studio, opening the folder
+.vs/
+out/
