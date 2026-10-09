@@ -993,19 +993,12 @@ static void gen(void)
         free(t);
     }
     if (!exists("docs.md")) {
-        size_t m;
-        char *u;
         printf("generating docs.md\n");
         fflush(stdout);
         sprintf(path, "%s/seed/README.md", data);
         t = slurp(path, &n);
-        sprintf(path, "%s/seed/limitations.md", data);
-        u = slurp(path, &m);
-        t = (char *)realloc(t, n + m);
-        memcpy(t + n, u, m);
-        repeat("docs.md", t, n + m, (size_t)8 << 20);
+        repeat("docs.md", t, n, (size_t)8 << 20);
         free(t);
-        free(u);
     }
     if (!exists("huge.log")) {
         printf("generating huge.log\n");

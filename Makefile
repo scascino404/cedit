@@ -89,7 +89,7 @@ $(BUILD)/bench: $(OBJ_DIR)/tests/bench.o $(LIB)
 
 $(BENCH_DATA)/seed:
 	mkdir -p $@
-	git archive $(BENCH_REV) src README.md limitations.md | tar -x -C $@
+	git archive $(BENCH_REV) src README.md | tar -x -C $@
 
 # make bench BENCH_ARGS="-o base.tsv", then after a change
 # make bench BENCH_ARGS="-b base.tsv" (see tests/bench.c for the options)
