@@ -12,6 +12,7 @@
  * The script stops when the app exits.
  */
 #define _XOPEN_SOURCE 700
+#include "../src/sys.h"
 #include "../src/ui.h"
 
 #include <stdio.h>
@@ -128,16 +129,15 @@ static void click(int cx, int cy, int button, int times)
 
 int main(int argc, char **argv)
 {
+    static char no_config[64];
     int i;
     if (argc < 3)
         return 1;
     prefix = argv[1];
+    /* no settings file, unless one is given (see test_ui.c) */
+    sprintf(no_config, "CEDIT_CONFIG=%s", sys_null_file);
     if (!getenv("CEDIT_CONFIG"))
-#ifdef _WIN32
-        putenv("CEDIT_CONFIG=NUL");    /* "NAME=" removes NAME there */
-#else
-        putenv("CEDIT_CONFIG=");
-#endif
+        putenv(no_config);
     SDL_SetMainReady();
     SDL_Init(SDL_INIT_VIDEO);
     if (app_init(&app, 2, argv + 1) < 0) {

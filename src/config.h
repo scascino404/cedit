@@ -1,6 +1,7 @@
 /*
  * config.h - user settings, kept in $XDG_CONFIG_HOME/cedit/cedit.conf
- * (or ~/.config/cedit/cedit.conf) as "key = value" lines. The CEDIT_CONFIG
+ * (or ~/.config/cedit/cedit.conf, or on Windows %APPDATA%\cedit\cedit.conf)
+ * as "key = value" lines. The CEDIT_CONFIG
  * environment variable overrides the path; set it empty to disable.
  */
 #ifndef CEDIT_CONFIG_H

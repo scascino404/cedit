@@ -7,15 +7,11 @@
  */
 #define _XOPEN_SOURCE 700
 #include "../src/ui.h"
+#include "testutil.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
-#include <dirent.h>
-#endif
-
-#include "testutil.h"
 
 #define LINES 4000000L      /* of 32 bytes: 128 MB */
 
@@ -84,15 +80,15 @@ static void line_text(char *out, long ln)
 
 static void make_file(void)
 {
-    int fd = tmp_file(path, sizeof path, "cedit-ui");
-    FILE *f = fdopen(fd, "wb");
+    FILE *f = tmp_file(path, sizeof path, "cedit-ui");
     char l[64];
     long i;
-    for (i = 0; i < LINES; i++) {
+    for (i = 0; f && i < LINES; i++) {
         line_text(l, i);
         fputs(l, f);
     }
-    fclose(f);
+    if (f)
+        fclose(f);
 }
 
 /* Opens the file, as dropping it on the window does. */
@@ -337,28 +333,18 @@ static void check_saved(void)
 static int temp_left(void)
 {
     const char *base = strrchr(path, '/') + 1;
-    int dlen = (int)(base - 1 - path), found = 0;
-#ifdef _WIN32
-    char pattern[512];
-    struct _finddata_t f;
-    intptr_t h;
-    sprintf(pattern, "%.*s/.%s.cedit-*", dlen, path, base);
-    h = _findfirst(pattern, &f);
-    found = h != -1;
-    if (found)
-        _findclose(h);
-#else
     char dir[512], name[64];
-    DIR *d;
-    struct dirent *e;
-    sprintf(dir, "%.*s", dlen, path);
+    SysDir *d;
+    SysEntry e;
+    int found = 0;
+
+    sprintf(dir, "%.*s", (int)(base - 1 - path), path);
     sprintf(name, ".%s.cedit-", base);
-    d = opendir(dir);
-    while (d && (e = readdir(d)) != NULL)
-        found |= strncmp(e->d_name, name, strlen(name)) == 0;
+    d = sys_dir_open(dir);
+    while (d && sys_dir_next(d, &e))
+        found |= strncmp(e.name, name, strlen(name)) == 0;
     if (d)
-        closedir(d);
-#endif
+        sys_dir_close(d);
     return found;
 }
 
@@ -407,9 +393,13 @@ static void test_save(void)
 
 int main(void)
 {
+    static char no_config[64];
     char *argv[2];
 
-    putenv(NO_CONFIG);
+    /* no settings file: the null file has none and keeps none (CEDIT_CONFIG
+     * set empty does that too, but Windows takes "NAME=" as unsetting it) */
+    sprintf(no_config, "CEDIT_CONFIG=%s", sys_null_file);
+    putenv(no_config);
     /* not offscreen: on macOS SDL gives its windows OpenGL there, which
      * it then can't load (no EGL), and dummy draws the same */
     if (!getenv("SDL_VIDEODRIVER"))
@@ -420,7 +410,7 @@ int main(void)
     SDL_SetMainReady();
     if (SDL_Init(SDL_INIT_VIDEO) < 0 || app_init(&app, 1, argv) < 0) {
         printf("test_ui: %s\n", SDL_GetError());
-        unlink(path);
+        remove(path);
         return 1;
     }
     app.blink_next = (unsigned long)-1;
@@ -435,7 +425,7 @@ int main(void)
 
     app_quit(&app);
     SDL_Quit();
-    unlink(path);
+    remove(path);
     if (failures) {
         printf("%d FAILURES\n", failures);
         return 1;

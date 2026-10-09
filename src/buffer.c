@@ -1,30 +1,14 @@
 /*
  * buffer.c - B-tree text storage, mmap loading and atomic saving.
  */
-#define _XOPEN_SOURCE 700
 #include "buffer.h"
+#include "sys.h"
 #include "util.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <io.h>
-#define W_OK 2
-#define fsync _commit
-#else
-#include <sys/mman.h>
-#include <sys/uio.h>
-#include <unistd.h>
-#endif
-#ifndef O_BINARY
-#define O_BINARY 0
-#endif
 
 #define FANOUT      64
 #define LOAD_CHUNK  8192        /* loaded leaves borrow ~this many bytes */
@@ -32,10 +16,6 @@
 #define LEAF_MAX    16384       /* an owned leaf is split above this size */
 #define LEAF_MIN    1024        /* a leaf below this is merged with its neighbor */
 #define FIRST_LOAD  (1024 * 1024)
-/* Windows: files up to this size are read rather than mapped. No program
- * can truncate a mapped file there, and most save by truncating: they
- * couldn't save a file while cedit has it open. */
-#define READ_MAX    ((size_t)16 * 1024 * 1024)
 
 struct Node {
     Node *parent;
@@ -446,11 +426,7 @@ static void drop_map(Buffer *b)
 {
     if (b->map) {
         if (b->map_is_mmap)
-#ifdef _WIN32
-            UnmapViewOfFile(b->map);
-#else
-            munmap(b->map, b->map_len);
-#endif
+            sys_unmap(b->map, b->map_len);
         else
             free(b->map);
     }
@@ -541,177 +517,15 @@ double buf_load_progress(const Buffer *b)
     return b->map_len ? (double)b->load_pos / (double)b->map_len : 1.0;
 }
 
-#ifdef _WIN32
-/* The message for Windows error code e into err, without the final period,
- * as strerror gives it. */
-static void win_error(char *err, size_t errlen, DWORD e)
-{
-    size_t n;
-    char num[32];
-
-    if (!FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                        NULL, e, 0, err, (DWORD)errlen, NULL)) {
-        sprintf(num, "Error %lu", (unsigned long)e);
-        str_copy(err, errlen, num);
-        return;
-    }
-    n = strlen(err);
-    while (n && (err[n - 1] == '\n' || err[n - 1] == '\r' || err[n - 1] == ' ' ||
-                 err[n - 1] == '.'))
-        err[--n] = 0;
-}
-
-/* Maps the file at path, or reads it, into b->map. */
-static int map_file(Buffer *b, const char *path, int *is_new, char *err,
-                    size_t errlen)
-{
-    DWORD attr = GetFileAttributesA(path), e;
-    HANDLE h;
-    LARGE_INTEGER size;
-    int disk;
-
-    if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        str_copy(err, errlen, "Is a directory");
-        return -1;
-    }
-    /* others may still change, rename or delete it */
-    h = CreateFileA(path, GENERIC_READ,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-                    OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-    if (h == INVALID_HANDLE_VALUE) {
-        e = GetLastError();
-        if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND) {
-            *is_new = 1;
-            return 0;
-        }
-        win_error(err, errlen, e);
-        return -1;
-    }
-    size.QuadPart = 0;
-    disk = GetFileType(h) == FILE_TYPE_DISK && GetFileSizeEx(h, &size);
-    if (disk && (size_t)size.QuadPart > READ_MAX) {
-        /* the mapping lasts after both handles are closed */
-        HANDLE m = CreateFileMappingA(h, NULL, PAGE_READONLY, 0, 0, NULL);
-        void *v = m ? MapViewOfFile(m, FILE_MAP_READ, 0, 0, 0) : NULL;
-        if (m)
-            CloseHandle(m);
-        if (v) {
-            b->map = (char *)v;
-            b->map_len = (size_t)size.QuadPart;
-            b->map_is_mmap = 1;
-        }
-    }
-    if (!b->map && !(disk && size.QuadPart == 0)) {
-        /* small, or not mappable (a pipe, ...): read it into one heap block */
-        size_t cap = disk ? (size_t)size.QuadPart + 1 : 65536, len = 0;
-        char *d = (char *)xmalloc(cap);
-        for (;;) {
-            DWORD r, want;
-            if (len == cap)
-                d = (char *)xrealloc(d, cap *= 2);
-            want = cap - len < (1u << 30) ? (DWORD)(cap - len) : 1u << 30;
-            if (!ReadFile(h, d + len, want, &r, NULL)) {
-                e = GetLastError();
-                if (e == ERROR_BROKEN_PIPE)     /* the end of a pipe */
-                    break;
-                win_error(err, errlen, e);
-                free(d);
-                CloseHandle(h);
-                return -1;
-            }
-            if (r == 0)
-                break;
-            len += r;
-        }
-        if (len) {
-            b->map = d;
-            b->map_len = len;
-        } else {
-            free(d);
-        }
-    }
-    CloseHandle(h);
-    return 0;
-}
-#else
-/* Maps the file at path, or reads it, into b->map. */
-static int map_file(Buffer *b, const char *path, int *is_new, char *err,
-                    size_t errlen)
-{
-    int fd;
-    struct stat st;
-
-    fd = open(path, O_RDONLY);
-    if (fd < 0) {
-        if (errno == ENOENT) {
-            *is_new = 1;
-            return 0;
-        }
-        str_copy(err, errlen, strerror(errno));
-        return -1;
-    }
-    if (fstat(fd, &st) < 0) {
-        str_copy(err, errlen, strerror(errno));
-        close(fd);
-        return -1;
-    }
-    if (S_ISDIR(st.st_mode)) {
-        str_copy(err, errlen, "Is a directory");
-        close(fd);
-        return -1;
-    }
-    if (S_ISREG(st.st_mode) && st.st_size > 0) {
-        void *m = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-        if (m != MAP_FAILED) {
-#ifdef POSIX_MADV_SEQUENTIAL
-            posix_madvise(m, (size_t)st.st_size, POSIX_MADV_SEQUENTIAL);
-#endif
-            b->map = (char *)m;
-            b->map_len = (size_t)st.st_size;
-            b->map_is_mmap = 1;
-        }
-    }
-    if (!b->map && !(S_ISREG(st.st_mode) && st.st_size == 0)) {
-        /* Not mappable (pipe, /proc, ...): read it into one heap block. */
-        size_t cap = 65536, len = 0;
-        char *d = (char *)xmalloc(cap);
-        for (;;) {
-            ssize_t r;
-            if (len == cap)
-                d = (char *)xrealloc(d, cap *= 2);
-            r = read(fd, d + len, cap - len);
-            if (r < 0 && errno == EINTR)
-                continue;
-            if (r < 0) {
-                str_copy(err, errlen, strerror(errno));
-                free(d);
-                close(fd);
-                return -1;
-            }
-            if (r == 0)
-                break;
-            len += (size_t)r;
-        }
-        if (len) {
-            b->map = d;
-            b->map_len = len;
-        } else {
-            free(d);
-        }
-    }
-    close(fd);
-    return 0;
-}
-#endif
-
 int buf_open(Buffer *b, const char *path, int *is_new, char *err,
              size_t errlen)
 {
     const char *nl;
+    int r = sys_load(path, &b->map, &b->map_len, &b->map_is_mmap, err, errlen);
 
-    *is_new = 0;
-    if (map_file(b, path, is_new, err, errlen) < 0)
+    if (r < 0)
         return -1;
+    *is_new = r == 1;
     if (b->map) {
         nl = (const char *)memchr(b->map, '\n', b->map_len);
         b->crlf = nl && nl > b->map && nl[-1] == '\r';
@@ -1083,77 +897,6 @@ static int save_fail(BufSave *s)
     return -1;
 }
 
-#ifdef _WIN32
-static char *full_path(const char *path)
-{
-    return _fullpath(NULL, path, 0);
-}
-
-/* Creates the temporary file s->tmp, whose name ends in XXXXXX. Returns
- * its descriptor, or -1. */
-static int open_temp(BufSave *s)
-{
-    /* replacing the target gives it the target's attributes */
-    if (_mktemp_s(s->tmp, strlen(s->tmp) + 1) != 0)
-        return -1;
-    return _open(s->tmp, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
-                 _S_IREAD | _S_IWRITE);
-}
-
-/* Puts the temporary file in place of the target. ReplaceFile keeps the
- * target's attributes, permissions and creation time, as open_temp keeps
- * the mode on POSIX. */
-static int replace_target(BufSave *s)
-{
-    DWORD e;
-
-    if (ReplaceFileA(s->target, s->tmp, NULL, REPLACEFILE_IGNORE_MERGE_ERRORS,
-                     NULL, NULL))
-        return 0;
-    e = GetLastError();
-    if (e == ERROR_FILE_NOT_FOUND) {    /* a new file */
-        if (MoveFileExA(s->tmp, s->target, MOVEFILE_WRITE_THROUGH))
-            return 0;
-        e = GetLastError();
-    }
-    win_error(s->err, sizeof s->err, e);
-    s->phase = SV_OVER;
-    return -1;
-}
-#else
-static char *full_path(const char *path)
-{
-    return realpath(path, NULL);
-}
-
-/* Creates the temporary file s->tmp, whose name ends in XXXXXX, with the
- * mode the target has, or a new file would get. Returns its descriptor,
- * or -1. */
-static int open_temp(BufSave *s)
-{
-    struct stat st;
-    mode_t mode;
-    int fd = mkstemp(s->tmp);
-
-    if (fd < 0)
-        return -1;
-    if (stat(s->target, &st) == 0) {
-        mode = st.st_mode & 07777;
-    } else {
-        mode_t um = umask(0);
-        umask(um);
-        mode = 0666 & ~um;
-    }
-    fchmod(fd, mode);
-    return fd;
-}
-
-static int replace_target(BufSave *s)
-{
-    return rename(s->tmp, s->target) < 0 ? save_fail(s) : 0;
-}
-#endif
-
 BufSave *buf_save_begin(Buffer *b, const char *path, char *err, size_t errlen)
 {
     BufSave *s = (BufSave *)xmalloc(sizeof *s);
@@ -1163,22 +906,23 @@ BufSave *buf_save_begin(Buffer *b, const char *path, char *err, size_t errlen)
     memset(s, 0, sizeof *s);
     s->b = b;
     s->fd = -1;
-    s->target = full_path(path);
-    if (!s->target)
+    s->target = sys_full_path(path);
+    if (!s->target) {
         s->target = xstrdup(path);
-    fix_slashes(s->target);
+        sys_fix_slashes(s->target);
+    }
     slash = strrchr(s->target, '/');
     dlen = slash ? (size_t)(slash - s->target) + 1 : 0;
     s->tmp = (char *)xmalloc(strlen(s->target) + 32);
     memcpy(s->tmp, s->target, dlen);
     sprintf(s->tmp + dlen, ".%s.cedit-XXXXXX", s->target + dlen);
-    s->fd = open_temp(s);
+    s->fd = sys_open_temp(s->tmp, s->target);
     if (s->fd < 0) {
         free(s->tmp);
         s->tmp = NULL;
         /* in place: the target must be writable, but is opened (and
          * truncated) only once the text no longer borrows from it */
-        if (access(s->target, W_OK) < 0 && errno != ENOENT) {
+        if (sys_writable(s->target) < 0) {
             str_copy(err, errlen, strerror(errno));
             buf_save_free(s);
             return NULL;
@@ -1188,76 +932,23 @@ BufSave *buf_save_begin(Buffer *b, const char *path, char *err, size_t errlen)
     return s;
 }
 
-#ifdef _WIN32
-static int write_out(int fd, const char *p, size_t n)
-{
-    while (n) {
-        int w = _write(fd, p, n < (1u << 30) ? (unsigned)n : 1u << 30);
-        if (w < 0)
-            return -1;
-        p += w;
-        n -= (size_t)w;
-    }
-    return 0;
-}
-
-/* Writes the leaves, gathered a megabyte to a system call (Windows has no
- * writev for files). */
-static int write_all(int fd, Node *leaf)
-{
-    size_t cap = (size_t)1 << 20, n = 0;
-    char *buf = (char *)xmalloc(cap);
-    int r = 0, e;
-
-    for (; leaf && r == 0; leaf = leaf_next(leaf)) {
-        if (n + leaf->bytes > cap) {
-            r = write_out(fd, buf, n);
-            n = 0;
-        }
-        if (r == 0 && leaf->bytes > cap)
-            r = write_out(fd, leaf->text, leaf->bytes);
-        else if (r == 0 && leaf->bytes) {
-            memcpy(buf + n, leaf->text, leaf->bytes);
-            n += leaf->bytes;
-        }
-    }
-    if (r == 0)
-        r = write_out(fd, buf, n);
-    e = errno;
-    free(buf);
-    errno = e;
-    return r;
-}
-#else
 /* Writes the leaves, many to a system call. */
 static int write_all(int fd, Node *leaf)
 {
-    struct iovec iov[256];
-    int n, k;
+    SysChunk c[SYS_CHUNKS];
+    int n;
 
     while (leaf) {
-        for (n = 0; leaf && n < 256; leaf = leaf_next(leaf))
+        for (n = 0; leaf && n < SYS_CHUNKS; leaf = leaf_next(leaf))
             if (leaf->bytes) {
-                iov[n].iov_base = leaf->text;
-                iov[n++].iov_len = leaf->bytes;
+                c[n].p = leaf->text;
+                c[n++].n = leaf->bytes;
             }
-        for (k = 0; k < n;) {
-            ssize_t w = writev(fd, iov + k, n - k);
-            if (w < 0 && errno == EINTR)
-                continue;
-            if (w < 0)
-                return -1;
-            for (; k < n && (size_t)w >= iov[k].iov_len; k++)
-                w -= (ssize_t)iov[k].iov_len;
-            if (k < n) {
-                iov[k].iov_base = (char *)iov[k].iov_base + w;
-                iov[k].iov_len -= (size_t)w;
-            }
-        }
+        if (sys_write(fd, c, n) < 0)
+            return -1;
     }
     return 0;
 }
-#endif
 
 int buf_save_step(BufSave *s, size_t budget)
 {
@@ -1282,7 +973,7 @@ int buf_save_step(BufSave *s, size_t budget)
         /* nothing borrows from the mapping now, and Windows can't
          * truncate a mapped file */
         drop_map(b);
-        s->fd = open(s->target, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666);
+        s->fd = sys_open_write(s->target);
         if (s->fd < 0)
             return save_fail(s);
         s->phase = SV_WRITE;
@@ -1296,17 +987,17 @@ int buf_save_end(BufSave *s)
     int fd = s->fd, e;
 
     s->fd = -1;
-    if (write_all(fd, first_leaf(s->b->root)) < 0 || (s->tmp && fsync(fd) < 0)) {
+    if (write_all(fd, first_leaf(s->b->root)) < 0 || (s->tmp && sys_sync(fd) < 0)) {
         e = errno;
-        close(fd);
+        sys_close(fd);
         errno = e;
         return save_fail(s);
     }
-    if (close(fd) < 0)
+    if (sys_close(fd) < 0)
         return save_fail(s);
-    if (s->tmp && replace_target(s) < 0)
-        return -1;
     s->phase = SV_OVER;
+    if (s->tmp && sys_replace(s->tmp, s->target, s->err, sizeof s->err) < 0)
+        return -1;
     s->ok = 1;
     return 0;
 }
@@ -1321,9 +1012,9 @@ void buf_save_free(BufSave *s)
     if (!s)
         return;
     if (s->fd >= 0)
-        close(s->fd);
+        sys_close(s->fd);
     if (s->tmp && !s->ok)
-        unlink(s->tmp);
+        remove(s->tmp);
     free(s->tmp);
     free(s->target);
     free(s);

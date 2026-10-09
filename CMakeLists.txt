@@ -78,11 +78,18 @@ elseif(NOT SDL2_FOUND)
                         "(see README.md), or set SDL2_DIR")
 endif()
 
+# what cedit needs from the system (src/sys.h)
+if(WIN32)
+    set(sys_src src/sys_win32.c)
+else()
+    set(sys_src src/sys_posix.c)
+endif()
+
 # The editing core links without SDL (its headers only need SDL's types),
 # so the tests that use only it don't link SDL either.
 add_library(cedit_core STATIC
     src/editor.c src/window.c src/buffer.c src/undo.c src/utf8.c src/util.c
-    src/syntax.c src/langs.c)
+    src/syntax.c src/langs.c ${sys_src})
 target_link_libraries(cedit_core
     PUBLIC $<COMPILE_ONLY:SDL2::SDL2>
     PRIVATE cedit_warnings)

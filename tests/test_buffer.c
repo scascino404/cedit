@@ -2,15 +2,14 @@
  * test_buffer.c - randomized tests of the B-tree buffer and undo against a
  * flat string reference model.
  */
-#define _XOPEN_SOURCE 700
 #include "../src/buffer.h"
 #include "../src/undo.h"
+#include "testutil.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "testutil.h"
 
 static int failures;
 
@@ -208,7 +207,7 @@ static void test_undo(void)
 static void test_load(void)
 {
     char path[512];
-    int fd = tmp_file(path, sizeof path, "cedit-test");
+    FILE *f = tmp_file(path, sizeof path, "cedit-test");
     size_t n = 3 * 1024 * 1024, i;
     char *data = (char *)malloc(n);
     Buffer *b;
@@ -220,9 +219,8 @@ static void test_load(void)
     /* a few very long lines */
     for (i = 200000; i < 300000; i++)
         data[i] = 'L';
-    if (write(fd, data, n) != (long)n)
+    if (!f || fwrite(data, 1, n, f) != n || fclose(f) != 0)
         printf("write failed\n");
-    close(fd);
 
     b = buf_new();
     CHECK(buf_open(b, path, &is_new, err, sizeof err) == 0, err, "open: ?");
@@ -254,23 +252,23 @@ static void test_load(void)
     buf_load_all(b);
     verify(b, "reload");
     buf_free(b);
-    unlink(path);
+    remove(path);
     free(data);
 }
 
 static void test_crlf(void)
 {
     char path[512];
-    int fd = tmp_file(path, sizeof path, "cedit-test"), is_new;
+    FILE *f = tmp_file(path, sizeof path, "cedit-test");
+    int is_new;
     const char *txt = "one\r\ntwo\r\nthree";
     Buffer *b = buf_new();
     char err[128];
     size_t len;
     const char *p;
 
-    if (write(fd, txt, strlen(txt)) < 0)
+    if (!f || fputs(txt, f) < 0 || fclose(f) != 0)
         printf("write failed\n");
-    close(fd);
     buf_open(b, path, &is_new, err, sizeof err);
     CHECK(b->crlf, "test", "crlf not detected");
     p = buf_line(b, 1, &len);
@@ -278,7 +276,16 @@ static void test_crlf(void)
     p = buf_line(b, 2, &len);
     CHECK(len == 5, "test", "last line");
     buf_free(b);
-    unlink(path);
+    remove(path);
+}
+
+/* Do a[0..n) and b[0..n) match, ignoring case? */
+static int match_icase(const char *a, const char *b, size_t n)
+{
+    for (; n; n--, a++, b++)
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
+            return 0;
+    return 1;
 }
 
 /* The match buf_find should give, from the reference. */
@@ -292,7 +299,7 @@ static size_t ref_find(size_t from, size_t to, const char *pat, size_t plen,
         i = backward ? ref_len - plen - k : k;
         if (backward ? i > from || i < to : i < from || i >= to)
             continue;
-        if (icase ? strncasecmp(ref + i, pat, plen) == 0
+        if (icase ? match_icase(ref + i, pat, plen)
                   : memcmp(ref + i, pat, plen) == 0)
             return i;
     }

@@ -1,19 +1,14 @@
 /*
  * config.c - load and save the settings file.
  */
-#define _XOPEN_SOURCE 700
 #include "config.h"
 #include "screen.h"
+#include "sys.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#ifdef _WIN32
-#include <direct.h>
-#define mkdir(dir, mode) _mkdir(dir)
-#endif
 
 enum { BOOL, INT, SIZE };
 
@@ -64,14 +59,6 @@ static int parse_value(int type, const char *val)
 static int config_path(char *buf, size_t n, int mkdirs)
 {
     const char *env = getenv("CEDIT_CONFIG");
-#ifdef _WIN32
-    /* %APPDATA%\cedit\cedit.conf */
-    const char *xdg = getenv("APPDATA");
-    const char *home = NULL;
-#else
-    const char *xdg = getenv("XDG_CONFIG_HOME");
-    const char *home = getenv("HOME");
-#endif
     char dir[4096];
 
     if (env) {
@@ -80,17 +67,13 @@ static int config_path(char *buf, size_t n, int mkdirs)
         strcpy(buf, env);
         return 1;
     }
-    if (xdg && *xdg && strlen(xdg) < sizeof dir - 16)
-        sprintf(dir, "%s", xdg);
-    else if (home && *home && strlen(home) < sizeof dir - 16)
-        sprintf(dir, "%s/.config", home);
-    else
+    if (!sys_config_dir(dir, sizeof dir - 16))
         return 0;
     if (mkdirs)
-        mkdir(dir, 0755);
+        sys_mkdir(dir);
     strcat(dir, "/cedit");
     if (mkdirs)
-        mkdir(dir, 0755);
+        sys_mkdir(dir);
     if (strlen(dir) + 16 > n)
         return 0;
     sprintf(buf, "%s/cedit.conf", dir);

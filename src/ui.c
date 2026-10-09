@@ -6,11 +6,11 @@
  * The menu bar (menu.c) and the dialog boxes (dialog.c) are generic; this
  * file gives them their content and acts on what the user picks.
  */
-#define _XOPEN_SOURCE 700
 #include "ui.h"
 #include "config.h"
 #include "logo.h"
 #include "path.h"
+#include "sys.h"
 #include "utf8.h"
 #include "util.h"
 
@@ -989,7 +989,7 @@ static void file_accept(App *a)
     if (!f->len)
         return;
     path_resolve(path, sizeof path, a->dir, f->text);
-    kind = path_kind(path);
+    kind = sys_kind(path);
     exists = kind >= 0;
     if (kind == 1) {
         path_full(a->dir, sizeof a->dir, path);

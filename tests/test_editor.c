@@ -2,16 +2,14 @@
  * test_editor.c - editing commands: line ends, undo grouping, paste,
  * replace, indentation, word motion, several views of one document.
  */
-#define _XOPEN_SOURCE 700
 #include "../src/editor.h"
 #include "../src/utf8.h"
 #include "../src/util.h"
+#include "testutil.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "testutil.h"
 
 static int failures;
 
@@ -40,14 +38,13 @@ static void expect(Editor *ed, const char *want, int line)
 static void open_text(Editor *ed, const char *text)
 {
     char path[512];
-    int fd = tmp_file(path, sizeof path, "cedit-ed");
+    FILE *f = tmp_file(path, sizeof path, "cedit-ed");
     char err[128];
-    if (write(fd, text, strlen(text)) < 0)
+    if (!f || fputs(text, f) < 0 || fclose(f) != 0)
         printf("write failed\n");
-    close(fd);
     ed_open(ed, path, err, sizeof err);
     buf_load_all(ed->doc->buf);
-    unlink(path);
+    remove(path);
 }
 
 static void type(Editor *ed, const char *s, unsigned long *t)
@@ -170,13 +167,12 @@ static char *slice_text(size_t *n)
 static void open_loading(Editor *ed, const char *text, size_t n)
 {
     char path[512];
-    int fd = tmp_file(path, sizeof path, "cedit-ed");
+    FILE *f = tmp_file(path, sizeof path, "cedit-ed");
     char err[128];
-    if (write(fd, text, n) != (long)n)
+    if (!f || fwrite(text, 1, n, f) != n || fclose(f) != 0)
         printf("write failed\n");
-    close(fd);
     ed_open(ed, path, err, sizeof err);
-    unlink(path);
+    remove(path);
 }
 
 static int at(const char *t, size_t i, const char *pat, size_t plen, int icase)

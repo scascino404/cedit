@@ -20,8 +20,4 @@ int ascii_lower(int c);
 /* Do a[0..n) and b[0..n) match, ignoring ASCII case if icase is set? */
 int mem_match(const char *a, const char *b, size_t n, int icase);
 
-/* On Windows, turns the backslashes in path into slashes: cedit splits
- * paths at '/', and Windows takes both. Elsewhere it does nothing. */
-void fix_slashes(char *path);
-
 #endif

@@ -7,11 +7,7 @@
 
 #include <stddef.h>
 
-/*
- * Paths use '/'. On Windows, paths from the system and from the user have
- * their backslashes turned into slashes, and roots are "C:/" and
- * "//server/share/".
- */
+/* Paths use '/', on Windows too (see sys.h). */
 
 /* dir, a '/' (unless dir ends in one, as the root does) and name, into
  * out[size]. */
@@ -24,9 +20,6 @@ void path_dir(char *out, size_t size, const char *path);
 /* The absolute path of path, with symbolic links resolved where the system
  * does that, or path itself if it can't be had. */
 void path_full(char *out, size_t size, const char *path);
-/* 1 if path is a folder, 0 if it is something else, -1 if there's nothing
- * there. */
-int path_kind(const char *path);
 
 typedef struct DirEntry {
     char *name;             /* folders end in '/' */
