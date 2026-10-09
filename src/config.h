@@ -15,6 +15,8 @@ typedef struct Config {
     int highlight;      /* syntax highlighting */
     int indent_spaces;  /* Tab inserts spaces */
     int word_wrap;
+    int window_w;       /* window size when last closed, 0 for none */
+    int window_h;
 } Config;
 
 /* Fills c with the defaults, then whatever the config file overrides. */

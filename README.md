@@ -74,7 +74,8 @@ On macOS, `Cmd` works as `Ctrl` as well, except where the system's own
 application menu answers first.
 
 Settings such as dark mode and text size are changed from the View and Edit
-menus, and cedit remembers them in `~/.config/cedit/cedit.conf`.
+menus, and cedit remembers them, and the window size, in
+`~/.config/cedit/cedit.conf`.
 
 ## License
 

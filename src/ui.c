@@ -1149,6 +1149,7 @@ static void apply_theme(App *a)
 static void save_settings(App *a)
 {
     Config c;
+    config_load(&c);        /* for the window size, saved on quit */
     c.size = a->scr.size;
     c.dark = a->dark;
     c.autoindent = a->opt.autoindent;
@@ -2102,7 +2103,7 @@ int app_init(App *a, int argc, char **argv)
     a->focused = 1;
     config_load(&cfg);
     font_init();
-    if (screen_init(&a->scr, cfg.size) < 0)
+    if (screen_init(&a->scr, cfg.size, cfg.window_w, cfg.window_h) < 0)
         return -1;
     ed_options_init(&a->opt);
     a->opt.autoindent = cfg.autoindent;
@@ -2131,8 +2132,28 @@ int app_init(App *a, int argc, char **argv)
     return 0;
 }
 
+/* Stores the window size in the config file, to open at it next time;
+ * not a maximized or full screen one, which says nothing about the size
+ * the user wants. */
+static void save_window_size(App *a)
+{
+    Config c;
+    int w, h;
+    if (SDL_GetWindowFlags(a->scr.win) & (SDL_WINDOW_MAXIMIZED |
+            SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP))
+        return;
+    SDL_GetWindowSize(a->scr.win, &w, &h);
+    config_load(&c);
+    if (w <= 0 || h <= 0 || (w == c.window_w && h == c.window_h))
+        return;
+    c.window_w = w;
+    c.window_h = h;
+    config_save(&c);
+}
+
 void app_quit(App *a)
 {
+    save_window_size(a);
     if (a->save_thread)
         SDL_WaitThread(a->save_thread, NULL);
     buf_save_free(a->save);

@@ -53,6 +53,7 @@ typedef struct Screen {
     Uint32 *fb;
     Cell *cells, *prev;
     int full;               /* force a full redraw */
+    int presented;          /* a frame has been shown */
     int cur_bg, cur_ink, cur_box;   /* text cursor colors */
 
     /* Self-drawn mouse pointer. The compositor scales system pointers by
@@ -70,7 +71,9 @@ typedef struct Screen {
     int pic_x, pic_y, pic_w, pic_h;
 } Screen;
 
-int screen_init(Screen *s, int size);
+/* Opens a w x h window, or a default size for the text size if w or h
+ * is 0. */
+int screen_init(Screen *s, int size, int w, int h);
 void screen_quit(Screen *s);
 /* Recomputes the grid after a resize or text size change. */
 void screen_layout(Screen *s);

@@ -26,20 +26,28 @@ static const struct {
     {&font_8x8, 3, 3}
 };
 
-int screen_init(Screen *s, int size)
+int screen_init(Screen *s, int size, int w, int h)
 {
-    int w, h;
     SDL_Rect usable;
+    int have_usable;
 
     memset(s, 0, sizeof *s);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-    /* about 80x25 cells of the chosen size, within 90% of the display */
-    w = 80 * sizes[size].font->w * sizes[size].mult;
-    h = 25 * sizes[size].font->h * sizes[size].mult;
-    if (SDL_GetDisplayUsableBounds(0, &usable) == 0) {
-        if (w > usable.w * 9 / 10)
+    have_usable = SDL_GetDisplayUsableBounds(0, &usable) == 0;
+    if (w > 0 && h > 0) {
+        /* the size it had last time, within the display */
+        if (have_usable && w > usable.w)
+            w = usable.w;
+        if (have_usable && h > usable.h)
+            h = usable.h;
+    } else {
+        /* 80x50 cells of the chosen size, the VGA mode of the 8x8 font,
+         * within 90% of the display */
+        w = 80 * sizes[size].font->w * sizes[size].mult;
+        h = 50 * sizes[size].font->h * sizes[size].mult;
+        if (have_usable && w > usable.w * 9 / 10)
             w = usable.w * 9 / 10;
-        if (h > usable.h * 9 / 10)
+        if (have_usable && h > usable.h * 9 / 10)
             h = usable.h * 9 / 10;
     }
     s->win = SDL_CreateWindow("cedit", SDL_WINDOWPOS_CENTERED,
@@ -142,6 +150,17 @@ void screen_layout(Screen *s)
     s->full = 1;
 }
 
+/* Sets the minimum window size for the text size. Not before the first
+ * frame is shown: Hyprland gives a floating Wayland window the minimum
+ * size if that comes before any frame. */
+static void set_min_size(Screen *s)
+{
+    if (s->presented)
+        SDL_SetWindowMinimumSize(s->win,
+                                 MIN_COLS * sizes[s->size].font->w * sizes[s->size].mult,
+                                 MIN_ROWS * sizes[s->size].font->h * sizes[s->size].mult);
+}
+
 void screen_set_size(Screen *s, int size)
 {
     if (size < 0)
@@ -149,8 +168,7 @@ void screen_set_size(Screen *s, int size)
     if (size >= SIZE_COUNT)
         size = SIZE_COUNT - 1;
     s->size = size;
-    SDL_SetWindowMinimumSize(s->win, MIN_COLS * sizes[size].font->w * sizes[size].mult,
-                             MIN_ROWS * sizes[size].font->h * sizes[size].mult);
+    set_min_size(s);
     screen_layout(s);
 }
 
@@ -439,6 +457,10 @@ void screen_present(Screen *s)
         SDL_RenderCopy(s->ren, s->ptr_tex, NULL, &r);
     }
     SDL_RenderPresent(s->ren);
+    if (!s->presented) {
+        s->presented = 1;
+        set_min_size(s);
+    }
 }
 
 void screen_pointer(Screen *s, int wx, int wy, int visible)

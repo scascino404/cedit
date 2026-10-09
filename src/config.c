@@ -14,7 +14,7 @@
 enum { BOOL, INT, SIZE };
 
 /* Adding a setting: a field in Config, a default and a row here. */
-static const Config defaults = {SIZE_MEDIUM, 0, 0, 0, 4, 1, 0, 1};
+static const Config defaults = {SIZE_MEDIUM, 0, 0, 0, 4, 1, 0, 1, 0, 0};
 
 static const struct {
     const char *key;
@@ -28,7 +28,9 @@ static const struct {
     {"tab_width", offsetof(Config, tab_width), INT},
     {"highlight", offsetof(Config, highlight), BOOL},
     {"indent_spaces", offsetof(Config, indent_spaces), BOOL},
-    {"word_wrap", offsetof(Config, word_wrap), BOOL}
+    {"word_wrap", offsetof(Config, word_wrap), BOOL},
+    {"window_width", offsetof(Config, window_w), INT},
+    {"window_height", offsetof(Config, window_h), INT}
 };
 #define NKEYS (sizeof keys / sizeof keys[0])
 
@@ -107,6 +109,9 @@ void config_load(Config *c)
         c->size = defaults.size;
     if (c->tab_width < 1 || c->tab_width > 16)
         c->tab_width = defaults.tab_width;
+    if (c->window_w <= 0 || c->window_h <= 0 ||
+        c->window_w > 100000 || c->window_h > 100000)
+        c->window_w = c->window_h = 0;
 }
 
 void config_save(const Config *c)
