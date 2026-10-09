@@ -7,8 +7,10 @@ editor. The most noticeable gaps come first; the rest are grouped by area.
 
 - **No word wrap.** Long lines scroll horizontally. There is also no
   horizontal scrollbar, only the mouse wheel with `Shift` and the cursor.
-- **One file at a time.** There are no tabs, split views or file tree, and
-  opening a file replaces the current one (after asking to save).
+- **No tabs or file tree.** Windows can be split to show several files, or
+  one file in several places, but a file is open only while a window shows
+  it: opening a file replaces the one in the focused window (after asking to
+  save, unless another window shows it too).
 - **No regex or whole-word search, and only one match is highlighted at a
   time.** Search is plain substring search, optionally case-sensitive.
   There's no incremental (search-as-you-type) find, and a search can't span

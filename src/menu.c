@@ -61,6 +61,15 @@ static const MenuItem m_view[] = {
     {NULL, NULL, 0},
     {"&Files in Directory", "Ctrl+P", CMD_FILES}
 };
+static const MenuItem m_window[] = {
+    {"Split &Vertically", "Ctrl+\\", CMD_SPLIT_V},
+    {"Split &Horizontally", "Ctrl+Shift+\\", CMD_SPLIT_H},
+    {NULL, NULL, 0},
+    {"&Close Window", "Ctrl+W", CMD_CLOSEWIN},
+    {NULL, NULL, 0},
+    {"&Next Window", "F6", CMD_NEXTWIN},
+    {"&Previous Window", "Shift+F6", CMD_PREVWIN}
+};
 static const MenuItem m_help[] = {
     {"&Keyboard...", "F1", CMD_HELP},
     {"&About cedit...", "", CMD_ABOUT}
@@ -73,7 +82,11 @@ static const MenuItem m_context[] = {
     {"&Paste", "Ctrl+V", CMD_PASTE},
     {"&Delete", "Del", CMD_DELETE},
     {NULL, NULL, 0},
-    {"Select &All", "Ctrl+A", CMD_SELALL}
+    {"Select &All", "Ctrl+A", CMD_SELALL},
+    {NULL, NULL, 0},
+    {"Split &Vertically", "Ctrl+\\", CMD_SPLIT_V},
+    {"Split &Horizontally", "Ctrl+Shift+\\", CMD_SPLIT_H},
+    {"Close &Window", "Ctrl+W", CMD_CLOSEWIN}
 };
 
 static const struct {
@@ -85,6 +98,7 @@ static const struct {
     {"&Edit", m_edit, sizeof m_edit / sizeof m_edit[0]},
     {"&Search", m_search, sizeof m_search / sizeof m_search[0]},
     {"&View", m_view, sizeof m_view / sizeof m_view[0]},
+    {"&Window", m_window, sizeof m_window / sizeof m_window[0]},
     {"&Help", m_help, sizeof m_help / sizeof m_help[0]},
     {NULL, m_context, sizeof m_context / sizeof m_context[0]},
     {NULL, NULL, 0}         /* the list menu, from MenuBar.list */

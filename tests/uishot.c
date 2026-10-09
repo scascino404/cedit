@@ -6,8 +6,10 @@
  *                d:<col>,<row> (double click) r:<col>,<row> (right click)
  *                w:<n> (wheel) s (screenshot)
  *                m:<col>,<row> (move the mouse there)
+ *                g:<col>,<row>,<col>,<row> (drag from one cell to the other)
  *                p:<ms> (wait, running the app's timers)
  *                z:<w>x<h> (resize the window, in window units)
+ * The script stops when the app exits.
  */
 #define _XOPEN_SOURCE 700
 #include "../src/ui.h"
@@ -64,12 +66,46 @@ static void key(const char *spec)
     frame();
 }
 
+/* The window coordinates of cell (cx, cy). */
+static int win_x(int cx)
+{
+    return (cx * app.scr.cw * app.scr.scale + 2) * app.scr.win_w / app.scr.out_w;
+}
+
+static int win_y(int cy)
+{
+    return (cy * app.scr.ch * app.scr.scale + 2) * app.scr.win_h / app.scr.out_h;
+}
+
+static void drag(int x0, int y0, int x1, int y1)
+{
+    SDL_Event e;
+    memset(&e, 0, sizeof e);
+    e.type = SDL_MOUSEBUTTONDOWN;
+    e.button.button = SDL_BUTTON_LEFT;
+    e.button.x = win_x(x0);
+    e.button.y = win_y(y0);
+    app_event(&app, &e);
+    memset(&e, 0, sizeof e);
+    e.type = SDL_MOUSEMOTION;
+    e.motion.x = win_x(x1);
+    e.motion.y = win_y(y1);
+    app_event(&app, &e);
+    memset(&e, 0, sizeof e);
+    e.type = SDL_MOUSEBUTTONUP;
+    e.button.button = SDL_BUTTON_LEFT;
+    e.button.x = win_x(x1);
+    e.button.y = win_y(y1);
+    app_event(&app, &e);
+    frame();
+}
+
 static void click(int cx, int cy, int button, int times)
 {
     SDL_Event e;
     int i;
-    int px = (cx * app.scr.cw * app.scr.scale + 2) * app.scr.win_w / app.scr.out_w;
-    int py = (cy * app.scr.ch * app.scr.scale + 2) * app.scr.win_h / app.scr.out_h;
+    int px = win_x(cx);
+    int py = win_y(cy);
     for (i = 0; i < times; i++) {
         memset(&e, 0, sizeof e);
         e.type = SDL_MOUSEBUTTONDOWN;
@@ -96,13 +132,13 @@ int main(int argc, char **argv)
         fprintf(stderr, "init: %s\n", SDL_GetError());
         return 1;
     }
-    while (buf_loading(app.ed.buf))
+    while (buf_loading(app.win->ed.doc->buf))
         app_tick(&app);
     app.blink_on = 1;
     app.blink_next = 0xFFFFFFFFUL;
     /* no pointer until the script moves the mouse (m:) */
     screen_pointer(&app.scr, 0, 0, 0);
-    for (i = 3; i < argc; i++) {
+    for (i = 3; i < argc && app.running; i++) {
         const char *t = argv[i];
         if (t[0] == 'k' && t[1] == ':') key(t + 2);
         else if (t[0] == 't' && t[1] == ':') {
@@ -116,6 +152,10 @@ int main(int argc, char **argv)
             int x, y;
             sscanf(t + 2, "%d,%d", &x, &y);
             click(x, y, t[0] == 'r' ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT, t[0] == 'd' ? 2 : 1);
+        } else if (t[0] == 'g' && t[1] == ':') {
+            int x0, y0, x1, y1;
+            sscanf(t + 2, "%d,%d,%d,%d", &x0, &y0, &x1, &y1);
+            drag(x0, y0, x1, y1);
         } else if (t[0] == 'm' && t[1] == ':') {
             SDL_Event e;
             int x, y;
@@ -154,6 +194,8 @@ int main(int argc, char **argv)
             frame();
         } else if (t[0] == 's' && !t[1]) shot();
     }
+    if (!app.running)
+        printf("exited before token %d\n", i - 2);
     app_quit(&app);
     SDL_Quit();
     return 0;

@@ -1,6 +1,6 @@
 /*
  * test_editor.c - editing commands: line ends, undo grouping, paste,
- * replace, indentation, word motion.
+ * replace, indentation, word motion, several views of one document.
  */
 #define _XOPEN_SOURCE 700
 #include "../src/editor.h"
@@ -14,9 +14,9 @@ static int failures;
 
 static char *contents(Editor *ed)
 {
-    size_t n = buf_size(ed->buf);
+    size_t n = buf_size(ed->doc->buf);
     char *t = (char *)malloc(n + 1);
-    buf_copy(ed->buf, 0, n, t);
+    buf_copy(ed->doc->buf, 0, n, t);
     t[n] = 0;
     return t;
 }
@@ -43,7 +43,7 @@ static void open_text(Editor *ed, const char *text)
         printf("write failed\n");
     close(fd);
     ed_open(ed, path, err, sizeof err);
-    buf_load_all(ed->buf);
+    buf_load_all(ed->doc->buf);
     unlink(path);
 }
 
@@ -58,12 +58,14 @@ static void type(Editor *ed, const char *s, unsigned long *t)
 
 int main(void)
 {
-    Editor ed;
+    Editor ed, v2;
+    EdOptions opt;
     unsigned long t = 100000;
     char *c;
     size_t n;
 
-    ed_init(&ed);
+    ed_options_init(&opt);
+    ed_init(&ed, &opt);
 
     /* typing groups by words; a pause or movement splits steps */
     type(&ed, "hello world", &t);
@@ -85,7 +87,7 @@ int main(void)
 
     /* newline with auto-indent, backspace joins lines */
     ed_new(&ed);
-    ed.autoindent = 1;
+    opt.autoindent = 1;
     type(&ed, "\tif", &t);
     ed_newline(&ed, t);
     type(&ed, "x", &t);
@@ -95,11 +97,11 @@ int main(void)
     CHECK(ed.cx == 0);
     ed_backspace(&ed, 0, t += 2000);
     EXPECT(&ed, "\tif\tx");
-    ed.autoindent = 0;
+    opt.autoindent = 0;
 
     /* CRLF files keep CRLF; the \r is invisible to the cursor */
     open_text(&ed, "ab\r\ncd\r\n");
-    CHECK(ed.buf->crlf);
+    CHECK(ed.doc->buf->crlf);
     ed_move(&ed, MV_END, 0);
     CHECK(ed.cx == 2);
     ed_newline(&ed, t += 2000);
@@ -118,9 +120,9 @@ int main(void)
 
     /* replace all is one undo step */
     open_text(&ed, "foo bar foo\nFOO\n");
-    strcpy(ed.find, "foo");
-    strcpy(ed.repl, "quux");
-    ed.icase = 1;
+    strcpy(opt.find, "foo");
+    strcpy(opt.repl, "quux");
+    opt.icase = 1;
     CHECK(ed_replace_all(&ed) == 3);
     EXPECT(&ed, "quux bar quux\nquux\n");
     ed_undo(&ed);
@@ -129,7 +131,7 @@ int main(void)
 
     /* find wraps */
     ed_set_cursor(&ed, 1, 0, 0);
-    ed.icase = 0;
+    opt.icase = 0;
     CHECK(ed_find(&ed, 0) == 2);
     CHECK(ed.cy == 0 && ed.cx == 3);
     CHECK(ed_find(&ed, 1) == 2);
@@ -144,7 +146,7 @@ int main(void)
     EXPECT(&ed, "a\nb\nc\n");
 
     /* indent with spaces */
-    ed.spaces = 1;
+    opt.spaces = 1;
     ed_set_cursor(&ed, 0, 0, 0);
     ed_set_cursor(&ed, 2, 0, 1);
     ed_tab(&ed, 0, t += 2000);
@@ -155,14 +157,14 @@ int main(void)
     ed_tab(&ed, 0, t += 2000);
     EXPECT(&ed, "a   \nb\nc\n");
     CHECK(ed.cx == 4);
-    ed.spaces = 0;
+    opt.spaces = 0;
 
     /* overwrite mode */
     open_text(&ed, "abcdef");
-    ed.overwrite = 1;
+    opt.overwrite = 1;
     type(&ed, "XY", &t);
     EXPECT(&ed, "XYcdef");
-    ed.overwrite = 0;
+    opt.overwrite = 0;
 
     /* word motion */
     open_text(&ed, "foo_bar  (baz)");
@@ -190,6 +192,49 @@ int main(void)
     ed_move(&ed, MV_END, 0);
     ed_backspace(&ed, 0, t += 2000);
     EXPECT(&ed, "\xc3\xa9t");
+
+    /* a second view keeps its place while the first one edits */
+    open_text(&ed, "one\ntwo\nthree\n");
+    ed_set_cursor(&ed, 1, 1, 0);
+    ed_init_view(&v2, &ed);
+    CHECK(v2.doc == ed.doc && ed_views(&ed) == 2);
+    CHECK(v2.cy == 1 && v2.cx == 1);
+    ed_set_cursor(&ed, 0, 0, 0);
+    type(&ed, "zero\n", &t);
+    EXPECT(&v2, "zero\none\ntwo\nthree\n");
+    CHECK(v2.cy == 2 && v2.cx == 1);
+    /* text deleted around it puts it at the deletion */
+    ed_set_cursor(&ed, 2, 0, 0);
+    ed_set_cursor(&ed, 3, 0, 1);
+    ed_delete(&ed, 0, t += 2000);
+    CHECK(v2.cy == 2 && v2.cx == 0);
+    /* its selection and top line move too */
+    ed_set_cursor(&v2, 2, 0, 0);
+    ed_set_cursor(&v2, 2, 5, 1);
+    v2.view_h = 2;
+    v2.top = 2;
+    ed_set_cursor(&ed, 0, 0, 0);
+    ed_newline(&ed, t += 2000);
+    CHECK(v2.ay == 3 && v2.ax == 0 && v2.cy == 3 && v2.cx == 5 && v2.top == 3);
+    /* undo works from either view, and moves the other one too */
+    ed_undo(&v2);
+    CHECK(v2.cy == 0 && ed.cy == 0 && ed.cx == 0);
+    ed_undo(&ed);
+    EXPECT(&ed, "zero\none\ntwo\nthree\n");
+    CHECK(v2.cy == 0 && v2.cx == 0);
+    /* an edit in another view starts a new undo step */
+    ed_set_cursor(&ed, 0, 0, 0);
+    ed_set_cursor(&v2, 0, 0, 0);
+    type(&ed, "a", &t);
+    type(&v2, "b", &t);
+    EXPECT(&ed, "bazero\none\ntwo\nthree\n");
+    ed_undo(&ed);
+    EXPECT(&ed, "azero\none\ntwo\nthree\n");
+    /* opening a file in one view leaves the other on the document */
+    ed_new(&v2);
+    CHECK(v2.doc != ed.doc && ed_views(&ed) == 1 && ed_views(&v2) == 1);
+    EXPECT(&ed, "azero\none\ntwo\nthree\n");
+    ed_free(&v2);
 
     ed_free(&ed);
     if (failures) {

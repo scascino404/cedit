@@ -89,7 +89,7 @@ Settings are changed from the menus and remembered across sessions in
 | `Ctrl+X` / `Ctrl+C` / `Ctrl+V` | Cut / Copy / Paste (system clipboard) |
 | `Ctrl+A` | Select all |
 | `Shift` + movement, mouse drag | Select (double-click: word, triple-click: line) |
-| Right-click, `Menu` key or `Shift+F10` | Context menu (Undo, Cut, Copy, Paste, Delete, Select All) |
+| Right-click, `Menu` key or `Shift+F10` | Context menu (Undo, Cut, Copy, Paste, Delete, Select All, Split, Close Window) |
 | `Ctrl+P` (View → Files in Directory) | Pop up the folders and files in the current file's directory and open one. `Right` / `Left` open and close folders |
 | `Ctrl+Left` / `Ctrl+Right` | Previous / next word |
 | `Ctrl+Up` / `Ctrl+Down` | Scroll without moving the cursor |
@@ -103,6 +103,9 @@ Settings are changed from the menus and remembered across sessions in
 | `Ctrl+-` / `Ctrl+=`, `Ctrl+wheel` | Smaller / larger text |
 | `Ctrl+0` | Default (medium) text |
 | `Ctrl+L` | Line numbers |
+| `Ctrl+\` / `Ctrl+Shift+\` | Split the focused window vertically (side by side) / horizontally (stacked) |
+| `Ctrl+W` | Close the focused window (closing the last one exits) |
+| `F6` / `Shift+F6`, `Alt+arrows`, click | Focus the next / previous window, the window in that direction, or the one clicked |
 | `F10` or tap `Alt`, `Alt+letter` | Menu bar |
 | `F1` | Keyboard help |
 
@@ -112,9 +115,10 @@ Settings are changed from the menus and remembered across sessions in
 |---|---|
 | `src/buffer.c` | Text storage: a B-tree of line-aligned leaves in the style of Vim's memline, memory-mapped copy-on-write loading, incremental indexing, atomic save |
 | `src/undo.c` | Linear undo/redo of byte-level insert/delete ops, grouped into steps |
-| `src/editor.c` | Cursor, selection, edit commands, search/replace. No SDL code |
+| `src/editor.c` | Cursor, selection, edit commands, search/replace, and documents shown in several views. No SDL code |
+| `src/window.c` | The tree of editor windows: splitting, closing, layout, and the window or border at a cell. No SDL code |
 | `src/screen.c` | A text-mode cell grid with box and label drawing. Only changed cells are rasterized, and the image is scaled up by integer factors |
-| `src/ui.c` | The application: commands, the concrete dialogs, the editor window, input handling |
+| `src/ui.c` | The application: commands, the concrete dialogs, the editor windows, input handling |
 | `src/menu.c` | The menu tables (every command with its label and shortcut), menu drawing and navigation, and the scrolling tree menu for files |
 | `src/dialog.c` | Generic dialog boxes: labels, input fields, checkboxes, buttons and a list box |
 | `src/theme.c` | The light and dark color themes |
@@ -161,6 +165,31 @@ crisp and square.
 The window can't be made smaller than 20×8 cells of the chosen size. A
 window manager that sizes it smaller anyway (a tiling one, say) gets the
 next smaller size that fits, until the window is big enough again.
+
+### Windows
+
+Each window is a view of a document, with its own cursor, selection and
+scroll position. A split shows the same file in both halves: an edit in one
+moves the cursor and scroll position of the others along with the text, and
+undo works from any of them. Opening a file in a window replaces only that
+window's file.
+
+The focused window, the one that typing, search and the Edit menu act on, has
+a double-line frame, an inverse title and the blinking cursor. The others
+have a single-line frame and a plain title, so every window stays outlined in
+the same blue in both themes. Messages appear in the focused window's bottom
+border.
+
+To resize two windows, drag the border between them: the left border of the
+window on the right (its neighbor's right border is the scrollbar), or either
+border where two stacked windows meet. Sizes are kept as proportions when the
+screen changes size, and a window keeps at least 12×5 cells while there is
+room. The mouse wheel scrolls the window under the pointer without focusing
+it.
+
+Closing a window or opening another file in it asks to save only if no other
+window shows the file. Closing the last window exits. Exit asks about each
+unsaved file in turn, focusing a window that shows it.
 
 ### Character set
 

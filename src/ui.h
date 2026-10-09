@@ -9,10 +9,13 @@
 #include "menu.h"
 #include "screen.h"
 #include "theme.h"
+#include "window.h"
 
 typedef struct App {
     Screen scr;
-    Editor ed;
+    Window *root;           /* the editor windows */
+    Window *win;            /* the one with focus */
+    EdOptions opt;          /* shared by all their views */
     const Theme *theme;
     int running;
 
@@ -26,21 +29,22 @@ typedef struct App {
     int pending;            /* action waiting for "save changes?" */
     char pending_path[4096];
 
-    char msg[256];          /* message in the window's bottom border,
-                               shown until msg_until */
+    char msg[256];          /* message in the focused window's bottom
+                               border, shown until msg_until */
     unsigned long msg_until;
 
     int blink_on;
     unsigned long blink_next;
     int focused;
 
-    int drag;               /* 1 selecting text, 2 scrollbar thumb */
+    int drag;               /* 1 selecting text, 2 scrollbar thumb,
+                               3 the border of split drag_split */
     int drag_grab;
+    Window *drag_split;
     int mouse_x, mouse_y;   /* in cells */
     unsigned long click_time;
     int click_count, click_x, click_y;
 
-    Highlight hl;           /* the language and lexer states of ed's buffer */
     int highlight;          /* syntax highlighting is on */
 
     int show_lnum;

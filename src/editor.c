@@ -12,25 +12,98 @@ enum { K_NONE, K_TYPE, K_BACK, K_DEL, K_OTHER };
 
 #define GROUP_MS 1000   /* a pause this long starts a new undo step */
 
-void ed_init(Editor *ed)
+void ed_options_init(EdOptions *opt)
+{
+    memset(opt, 0, sizeof *opt);
+    opt->tabw = 4;
+    opt->icase = 1;
+}
+
+static Doc *doc_new(Buffer *b, const char *path)
+{
+    Doc *d = (Doc *)xmalloc(sizeof *d);
+    memset(d, 0, sizeof *d);
+    d->buf = b;
+    undo_init(&d->undo);
+    d->path = path ? xstrdup(path) : NULL;
+    return d;
+}
+
+static void attach(Editor *ed, Doc *d)
+{
+    ed->doc = d;
+    ed->next_view = d->views;
+    d->views = ed;
+}
+
+/* Unlinks ed from its document, and frees the document if no other view
+ * shows it. */
+static void detach(Editor *ed)
+{
+    Doc *d = ed->doc;
+    Editor **p = &d->views;
+    while (*p != ed)
+        p = &(*p)->next_view;
+    *p = ed->next_view;
+    ed->doc = NULL;
+    ed->next_view = NULL;
+    if (d->last_ed == ed)
+        d->last_ed = NULL;
+    if (d->views)
+        return;
+    if (d->free_data)
+        d->free_data(d->data);
+    buf_free(d->buf);
+    undo_free(&d->undo);
+    free(d->path);
+    free(d);
+}
+
+static void init_view(Editor *ed, EdOptions *opt)
 {
     memset(ed, 0, sizeof *ed);
-    ed->buf = buf_new();
-    undo_init(&ed->undo);
+    ed->opt = opt;
     ed->want = -1;
-    ed->tabw = 4;
-    ed->icase = 1;
     ed->view_w = 80;
     ed->view_h = 25;
 }
 
+void ed_init(Editor *ed, EdOptions *opt)
+{
+    init_view(ed, opt);
+    attach(ed, doc_new(buf_new(), NULL));
+}
+
+void ed_init_view(Editor *ed, const Editor *from)
+{
+    init_view(ed, from->opt);
+    ed->cy = from->cy;
+    ed->cx = from->cx;
+    ed->sel = from->sel;
+    ed->ay = from->ay;
+    ed->ax = from->ax;
+    ed->want = from->want;
+    ed->top = from->top;
+    ed->left = from->left;
+    ed->view_w = from->view_w;
+    ed->view_h = from->view_h;
+    ed->moved = 1;
+    attach(ed, from->doc);
+}
+
 void ed_free(Editor *ed)
 {
-    buf_free(ed->buf);
-    undo_free(&ed->undo);
-    free(ed->path);
-    ed->buf = NULL;
-    ed->path = NULL;
+    if (ed->doc)
+        detach(ed);
+}
+
+int ed_views(const Editor *ed)
+{
+    const Editor *v;
+    int n = 0;
+    for (v = ed->doc->views; v; v = v->next_view)
+        n++;
+    return n;
 }
 
 static void reset_view(Editor *ed)
@@ -40,26 +113,16 @@ static void reset_view(Editor *ed)
     ed->sel = 0;
     ed->want = -1;
     ed->top = ed->left = 0;
-    ed->last_kind = K_NONE;
+    ed->moved = 1;
     ed->follow = 1;
 }
 
-/* path may be ed->path itself. */
-static void set_path(Editor *ed, const char *path)
-{
-    char *p = path ? xstrdup(path) : NULL;
-    free(ed->path);
-    ed->path = p;
-}
-
-/* Replaces the buffer with b, dropping the undo history. */
+/* Shows a new document of buffer b in this view. */
 static void set_buffer(Editor *ed, Buffer *b, const char *path)
 {
-    buf_free(ed->buf);
-    undo_free(&ed->undo);
-    ed->buf = b;
-    undo_init(&ed->undo);
-    set_path(ed, path);
+    Doc *d = doc_new(b, path);
+    detach(ed);
+    attach(ed, d);
     reset_view(ed);
 }
 
@@ -83,48 +146,52 @@ int ed_open(Editor *ed, const char *path, char *err, size_t errlen)
 
 int ed_save(Editor *ed, const char *path, char *err, size_t errlen)
 {
-    if (buf_save(ed->buf, path, err, errlen) < 0)
+    Doc *d = ed->doc;
+    char *p;
+    if (buf_save(d->buf, path, err, errlen) < 0)
         return -1;
-    undo_mark_saved(&ed->undo);
-    ed->last_kind = K_NONE;
-    set_path(ed, path);
+    undo_mark_saved(&d->undo);
+    d->last_kind = K_NONE;
+    p = xstrdup(path);          /* path may be d->path itself */
+    free(d->path);
+    d->path = p;
     return 0;
 }
 
 int ed_modified(const Editor *ed)
 {
-    return undo_modified(&ed->undo);
+    return undo_modified(&ed->doc->undo);
 }
 
 const char *ed_name(const Editor *ed)
 {
-    const char *s;
-    if (!ed->path)
+    const char *s, *path = ed->doc->path;
+    if (!path)
         return "Untitled";
-    s = strrchr(ed->path, '/');
-    return s ? s + 1 : ed->path;
+    s = strrchr(path, '/');
+    return s ? s + 1 : path;
 }
 
 long ed_lines(Editor *ed)
 {
-    return buf_lines(ed->buf);
+    return buf_lines(ed->doc->buf);
 }
 
 const char *ed_line(Editor *ed, long ln, size_t *len)
 {
-    return buf_line(ed->buf, ln, len);
+    return buf_line(ed->doc->buf, ln, len);
 }
 
 static size_t line_len(Editor *ed, long ln)
 {
     size_t n;
-    buf_line(ed->buf, ln, &n);
+    buf_line(ed->doc->buf, ln, &n);
     return n;
 }
 
 static size_t pos_off(Editor *ed, long ln, size_t col)
 {
-    return buf_line_offset(ed->buf, ln) + col;
+    return buf_line_offset(ed->doc->buf, ln) + col;
 }
 
 static size_t cur_off(Editor *ed)
@@ -135,7 +202,7 @@ static size_t cur_off(Editor *ed)
 static void off_pos(Editor *ed, size_t off, long *ln, size_t *col)
 {
     size_t len;
-    buf_offset_to_pos(ed->buf, off, ln, col);
+    buf_offset_to_pos(ed->doc->buf, off, ln, col);
     len = line_len(ed, *ln);
     if (*col > len)
         *col = len;
@@ -166,7 +233,7 @@ long ed_disp_col(const Editor *ed, const char *s, size_t len, size_t col)
         col = len;
     while (i < col) {
         if (s[i] == '\t') {
-            d = (d / ed->tabw + 1) * ed->tabw;
+            d = (d / ed->opt->tabw + 1) * ed->opt->tabw;
             i++;
         } else {
             i = utf8_next(s, len, i);
@@ -181,7 +248,7 @@ size_t ed_byte_col(const Editor *ed, const char *s, size_t len, long dcol)
     size_t i = 0;
     long d = 0;
     while (i < len) {
-        long w = s[i] == '\t' ? (d / ed->tabw + 1) * ed->tabw - d : 1;
+        long w = s[i] == '\t' ? (d / ed->opt->tabw + 1) * ed->opt->tabw - d : 1;
         if (d + w > dcol)
             break;
         d += w;
@@ -373,7 +440,7 @@ void ed_move(Editor *ed, int how, int extend)
         ed->cx = 0;
         break;
     case MV_DOCEND:
-        buf_load_all(ed->buf);
+        buf_load_all(ed->doc->buf);
         ed->cy = ed_lines(ed) - 1;
         ed->cx = line_len(ed, ed->cy);
         break;
@@ -391,7 +458,7 @@ void ed_set_cursor(Editor *ed, long ln, size_t col, int extend)
 
 void ed_select_all(Editor *ed)
 {
-    buf_load_all(ed->buf);
+    buf_load_all(ed->doc->buf);
     ed->sel = 1;
     ed->ay = 0;
     ed->ax = 0;
@@ -474,25 +541,105 @@ void ed_scroll_to_cursor(Editor *ed)
 /* editing                                                             */
 /* ------------------------------------------------------------------ */
 
-/* Decides whether this edit continues the current undo step. */
-static void group(Editor *ed, int kind, int space, unsigned long now)
+/*
+ * The other views of the document keep their place in the text: before an
+ * edit their positions become offsets, each change moves the offsets, and
+ * after it they become positions again.
+ */
+
+/* Moves offset p past inserting (ins) or deleting n bytes at off. A view
+ * at off stays before inserted text, except a top line (after). */
+static size_t map_off(size_t p, int ins, size_t off, size_t n, int after)
 {
-    if (kind == K_OTHER || kind != ed->last_kind || ed->moved ||
-        now - ed->last_time > GROUP_MS ||
-        (kind == K_TYPE && !space && ed->last_space))
-        undo_boundary(&ed->undo);
-    ed->last_kind = kind;
-    ed->last_space = space;
-    ed->last_time = now;
-    ed->moved = 0;
+    if (ins)
+        return p > off || (after && p == off) ? p + n : p;
+    if (p >= off + n)
+        return p - n;
+    return p > off ? off : p;
 }
 
+static void views_save(Editor *ed)
+{
+    Editor *v;
+    for (v = ed->doc->views; v; v = v->next_view) {
+        if (v == ed)
+            continue;
+        clamp(v);
+        if (v->top >= ed_lines(v))
+            v->top = ed_lines(v) - 1;
+        v->o_cur = cur_off(v);
+        v->o_anc = v->sel ? pos_off(v, v->ay, v->ax) : v->o_cur;
+        v->o_top = buf_line_offset(v->doc->buf, v->top);
+    }
+}
+
+static void views_map(Editor *ed, int ins, size_t off, size_t n)
+{
+    Editor *v;
+    for (v = ed->doc->views; v; v = v->next_view) {
+        if (v == ed)
+            continue;
+        v->o_cur = map_off(v->o_cur, ins, off, n, 0);
+        v->o_anc = map_off(v->o_anc, ins, off, n, 0);
+        v->o_top = map_off(v->o_top, ins, off, n, 1);
+    }
+}
+
+static void views_restore(Editor *ed)
+{
+    Editor *v;
+    size_t col;
+    for (v = ed->doc->views; v; v = v->next_view) {
+        if (v == ed)
+            continue;
+        off_pos(v, v->o_cur, &v->cy, &v->cx);
+        if (v->sel)
+            off_pos(v, v->o_anc, &v->ay, &v->ax);
+        off_pos(v, v->o_top, &v->top, &col);
+        ed_scroll(v, 0);
+    }
+}
+
+/* Edits the buffer, recording the change for undo. */
+static void ins(Editor *ed, size_t off, const char *s, size_t n, size_t cursor)
+{
+    undo_insert(&ed->doc->undo, ed->doc->buf, off, s, n, cursor);
+    views_map(ed, 1, off, n);
+}
+
+static void del(Editor *ed, size_t off, size_t n, size_t cursor)
+{
+    size_t size = buf_size(ed->doc->buf);
+    if (off + n > size)
+        n = size - off;
+    undo_delete(&ed->doc->undo, ed->doc->buf, off, n, cursor);
+    views_map(ed, 0, off, n);
+}
+
+/* Starts an edit, deciding whether it continues the current undo step. */
+static void group(Editor *ed, int kind, int space, unsigned long now)
+{
+    Doc *d = ed->doc;
+    if (kind == K_OTHER || kind != d->last_kind || ed->moved || ed != d->last_ed ||
+        now - d->last_time > GROUP_MS ||
+        (kind == K_TYPE && !space && d->last_space))
+        undo_boundary(&d->undo);
+    d->last_ed = ed;
+    d->last_kind = kind;
+    d->last_space = space;
+    d->last_time = now;
+    ed->moved = 0;
+    views_save(ed);
+}
+
+/* Ends an edit. */
 static void after_edit(Editor *ed)
 {
     clamp(ed);
     ed->want = -1;
     ed->follow = 1;
-    undo_set_cursor(&ed->undo, cur_off(ed));
+    undo_set_cursor(&ed->doc->undo, cur_off(ed));
+    views_restore(ed);
 }
 
 static int del_sel(Editor *ed)
@@ -506,7 +653,7 @@ static int del_sel(Editor *ed)
     }
     a = pos_off(ed, sy, sx);
     b = pos_off(ed, ey, ex);
-    undo_delete(&ed->undo, ed->buf, a, b - a, cur_off(ed));
+    del(ed, a, b - a, cur_off(ed));
     ed->cy = sy;
     ed->cx = sx;
     ed->sel = 0;
@@ -539,15 +686,15 @@ void ed_type(Editor *ed, const char *s, size_t n, unsigned long now)
     group(ed, K_TYPE, space, now);
     del_sel(ed);
     off = cur_off(ed);
-    if (ed->overwrite) {
+    if (ed->opt->overwrite) {
         size_t len, end = ed->cx, i;
         const char *l = ed_line(ed, ed->cy, &len);
         for (i = 0; i < n; i = utf8_next(s, n, i))
             end = utf8_next(l, len, end);
         if (end > ed->cx)
-            undo_delete(&ed->undo, ed->buf, off, end - ed->cx, off);
+            del(ed, off, end - ed->cx, off);
     }
-    undo_insert(&ed->undo, ed->buf, off, s, n, off);
+    ins(ed, off, s, n, off);
     ed->cx += n;
     after_edit(ed);
 }
@@ -557,18 +704,18 @@ void ed_newline(Editor *ed, unsigned long now)
     size_t len, i = 0, off;
     const char *l;
     char *t;
-    size_t eol = ed->buf->crlf ? 2 : 1;
+    size_t eol = ed->doc->buf->crlf ? 2 : 1;
 
     group(ed, K_OTHER, 0, now);
     del_sel(ed);
     l = ed_line(ed, ed->cy, &len);
-    while (ed->autoindent && i < ed->cx && (l[i] == ' ' || l[i] == '\t'))
+    while (ed->opt->autoindent && i < ed->cx && (l[i] == ' ' || l[i] == '\t'))
         i++;
     t = (char *)xmalloc(eol + i);
-    memcpy(t, ed->buf->crlf ? "\r\n" : "\n", eol);
+    memcpy(t, ed->doc->buf->crlf ? "\r\n" : "\n", eol);
     memcpy(t + eol, l, i);
     off = cur_off(ed);
-    undo_insert(&ed->undo, ed->buf, off, t, eol + i, off);
+    ins(ed, off, t, eol + i, off);
     free(t);
     ed->cy++;
     ed->cx = i;
@@ -588,8 +735,8 @@ void ed_tab(Editor *ed, int unindent, unsigned long now)
         size_t len;
         const char *l = ed_line(ed, ed->cy, &len);
         long d = ed_disp_col(ed, l, len, had ? sx : ed->cx);
-        if (ed->spaces)
-            ed_type(ed, sp, (size_t)(ed->tabw - d % ed->tabw), now);
+        if (ed->opt->spaces)
+            ed_type(ed, sp, (size_t)(ed->opt->tabw - d % ed->opt->tabw), now);
         else
             ed_type(ed, "\t", 1, now);
         return;
@@ -605,20 +752,20 @@ void ed_tab(Editor *ed, int unindent, unsigned long now)
         size_t off = pos_off(ed, ln, 0), len, k = 0;
         const char *l;
         if (!unindent) {
-            if (ed->spaces)
-                undo_insert(&ed->undo, ed->buf, off, sp, (size_t)ed->tabw, cur_off(ed));
+            if (ed->opt->spaces)
+                ins(ed, off, sp, (size_t)ed->opt->tabw, cur_off(ed));
             else
-                undo_insert(&ed->undo, ed->buf, off, "\t", 1, cur_off(ed));
+                ins(ed, off, "\t", 1, cur_off(ed));
             continue;
         }
         l = ed_line(ed, ln, &len);
         if (len && l[0] == '\t')
             k = 1;
         else
-            while (k < len && k < (size_t)ed->tabw && l[k] == ' ')
+            while (k < len && k < (size_t)ed->opt->tabw && l[k] == ' ')
                 k++;
         if (k) {
-            undo_delete(&ed->undo, ed->buf, off, k, cur_off(ed));
+            del(ed, off, k, cur_off(ed));
             if (!had && ln == ed->cy)
                 ed->cx = ed->cx > k ? ed->cx - k : 0;
         }
@@ -646,12 +793,12 @@ void ed_backspace(Editor *ed, int word, unsigned long now)
         size_t off;
         start = word ? word_left(l, ed->cx) : utf8_prev(l, ed->cx);
         off = pos_off(ed, ed->cy, start);
-        undo_delete(&ed->undo, ed->buf, off, ed->cx - start, off + (ed->cx - start));
+        del(ed, off, ed->cx - start, off + (ed->cx - start));
         ed->cx = start;
     } else if (ed->cy > 0) {
         size_t plen = line_len(ed, ed->cy - 1);
         size_t a = pos_off(ed, ed->cy - 1, plen), b = cur_off(ed);
-        undo_delete(&ed->undo, ed->buf, a, b - a, b);
+        del(ed, a, b - a, b);
         ed->cy--;
         ed->cx = plen;
     }
@@ -670,10 +817,10 @@ void ed_delete(Editor *ed, int word, unsigned long now)
     off = cur_off(ed);
     if (ed->cx < len) {
         end = word ? word_right(l, len, ed->cx) : utf8_next(l, len, ed->cx);
-        undo_delete(&ed->undo, ed->buf, off, end - ed->cx, off);
+        del(ed, off, end - ed->cx, off);
     } else if (ed->cy < ed_lines(ed) - 1) {
         size_t b = pos_off(ed, ed->cy + 1, 0);
-        undo_delete(&ed->undo, ed->buf, off, b - off, off);
+        del(ed, off, b - off, off);
     }
     after_edit(ed);
 }
@@ -687,14 +834,14 @@ void ed_paste(Editor *ed, const char *s, size_t n)
     for (i = 0; i < n; i++) {
         if (s[i] == '\r' && i + 1 < n && s[i + 1] == '\n')
             continue;
-        if (s[i] == '\n' && ed->buf->crlf)
+        if (s[i] == '\n' && ed->doc->buf->crlf)
             t[m++] = '\r';
         t[m++] = s[i];
     }
     group(ed, K_OTHER, 0, 0);
     del_sel(ed);
     off = cur_off(ed);
-    undo_insert(&ed->undo, ed->buf, off, t, m, off);
+    ins(ed, off, t, m, off);
     free(t);
     off_pos(ed, off + m, &ed->cy, &ed->cx);
     after_edit(ed);
@@ -711,9 +858,9 @@ char *ed_copy(Editor *ed, size_t *n)
     a = pos_off(ed, sy, sx);
     b = pos_off(ed, ey, ex);
     t = (char *)xmalloc(b - a + 1);
-    buf_copy(ed->buf, a, b - a, t);
+    buf_copy(ed->doc->buf, a, b - a, t);
     for (i = 0; i < b - a; i++) {
-        if (ed->buf->crlf && t[i] == '\r' && i + 1 < b - a && t[i + 1] == '\n')
+        if (ed->doc->buf->crlf && t[i] == '\r' && i + 1 < b - a && t[i + 1] == '\n')
             continue;
         t[m++] = t[i];
     }
@@ -731,25 +878,43 @@ static void after_undo(Editor *ed, size_t c)
 {
     off_pos(ed, c, &ed->cy, &ed->cx);
     ed->sel = 0;
-    ed->last_kind = K_NONE;
+    ed->doc->last_kind = K_NONE;
     ed->want = -1;
     ed->follow = 1;
+    views_restore(ed);
 }
 
 int ed_undo(Editor *ed)
 {
+    Undo *u = &ed->doc->undo;
+    UndoStep *s;
     size_t c;
-    if (!undo_undo(&ed->undo, ed->buf, &c))
+    int i;
+
+    views_save(ed);
+    if (!undo_undo(u, ed->doc->buf, &c))
         return 0;
+    /* the step's ops were reverted last to first */
+    s = &u->steps[u->pos];
+    for (i = s->nops - 1; i >= 0; i--)
+        views_map(ed, !s->ops[i].ins, s->ops[i].off, s->ops[i].len);
     after_undo(ed, c);
     return 1;
 }
 
 int ed_redo(Editor *ed)
 {
+    Undo *u = &ed->doc->undo;
+    UndoStep *s;
     size_t c;
-    if (!undo_redo(&ed->undo, ed->buf, &c))
+    int i;
+
+    views_save(ed);
+    if (!undo_redo(u, ed->doc->buf, &c))
         return 0;
+    s = &u->steps[u->pos - 1];
+    for (i = 0; i < s->nops; i++)
+        views_map(ed, s->ops[i].ins, s->ops[i].off, s->ops[i].len);
     after_undo(ed, c);
     return 1;
 }
@@ -770,7 +935,7 @@ static void select_range(Editor *ed, size_t a, size_t b)
 
 int ed_find(Editor *ed, int backward)
 {
-    size_t plen = strlen(ed->find), from, m, none = (size_t)-1;
+    size_t plen = strlen(ed->opt->find), from, m, none = (size_t)-1;
     long sy, ey;
     size_t sx, ex;
     int have = ed_sel_range(ed, &sy, &sx, &ey, &ex), wrapped = 0;
@@ -779,16 +944,16 @@ int ed_find(Editor *ed, int backward)
         return 0;
     if (!backward) {
         from = have ? pos_off(ed, ey, ex) : cur_off(ed);
-        m = buf_find(ed->buf, from, ed->find, plen, ed->icase, 0);
+        m = buf_find(ed->doc->buf, from, ed->opt->find, plen, ed->opt->icase, 0);
         if (m == none) {
-            m = buf_find(ed->buf, 0, ed->find, plen, ed->icase, 0);
+            m = buf_find(ed->doc->buf, 0, ed->opt->find, plen, ed->opt->icase, 0);
             wrapped = 1;
         }
     } else {
         from = have ? pos_off(ed, sy, sx) : cur_off(ed);
-        m = from ? buf_find(ed->buf, from - 1, ed->find, plen, ed->icase, 1) : none;
+        m = from ? buf_find(ed->doc->buf, from - 1, ed->opt->find, plen, ed->opt->icase, 1) : none;
         if (m == none) {
-            m = buf_find(ed->buf, buf_size(ed->buf), ed->find, plen, ed->icase, 1);
+            m = buf_find(ed->doc->buf, buf_size(ed->doc->buf), ed->opt->find, plen, ed->opt->icase, 1);
             wrapped = 1;
         }
     }
@@ -801,7 +966,7 @@ int ed_find(Editor *ed, int backward)
 int ed_replace(Editor *ed)
 {
     long sy, ey;
-    size_t sx, ex, plen = strlen(ed->find), rlen = strlen(ed->repl);
+    size_t sx, ex, plen = strlen(ed->opt->find), rlen = strlen(ed->opt->repl);
 
     /* replace the selection if it is a match, then find the next one */
     if (ed_sel_range(ed, &sy, &sx, &ey, &ex)) {
@@ -809,14 +974,14 @@ int ed_replace(Editor *ed)
         int same = b - a == plen;
         if (same) {
             char *t = (char *)xmalloc(plen);
-            buf_copy(ed->buf, a, plen, t);
-            same = mem_match(t, ed->find, plen, ed->icase);
+            buf_copy(ed->doc->buf, a, plen, t);
+            same = mem_match(t, ed->opt->find, plen, ed->opt->icase);
             free(t);
         }
         if (same) {
             group(ed, K_OTHER, 0, 0);
-            undo_delete(&ed->undo, ed->buf, a, plen, cur_off(ed));
-            undo_insert(&ed->undo, ed->buf, a, ed->repl, rlen, a);
+            del(ed, a, plen, cur_off(ed));
+            ins(ed, a, ed->opt->repl, rlen, a);
             off_pos(ed, a + rlen, &ed->cy, &ed->cx);
             ed->sel = 0;
             after_edit(ed);
@@ -827,16 +992,16 @@ int ed_replace(Editor *ed)
 
 long ed_replace_all(Editor *ed)
 {
-    size_t plen = strlen(ed->find), rlen = strlen(ed->repl), off = 0, m;
+    size_t plen = strlen(ed->opt->find), rlen = strlen(ed->opt->repl), off = 0, m;
     size_t cur = cur_off(ed);
     long count = 0;
 
     if (!plen)
         return 0;
     group(ed, K_OTHER, 0, 0);
-    while ((m = buf_find(ed->buf, off, ed->find, plen, ed->icase, 0)) != (size_t)-1) {
-        undo_delete(&ed->undo, ed->buf, m, plen, cur);
-        undo_insert(&ed->undo, ed->buf, m, ed->repl, rlen, cur);
+    while ((m = buf_find(ed->doc->buf, off, ed->opt->find, plen, ed->opt->icase, 0)) != (size_t)-1) {
+        del(ed, m, plen, cur);
+        ins(ed, m, ed->opt->repl, rlen, cur);
         off = m + rlen;
         count++;
     }
@@ -848,7 +1013,7 @@ long ed_replace_all(Editor *ed)
 void ed_goto(Editor *ed, long line)
 {
     if (line > ed_lines(ed))
-        buf_load_all(ed->buf);
+        buf_load_all(ed->doc->buf);
     if (line < 1)
         line = 1;
     if (line > ed_lines(ed))

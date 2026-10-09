@@ -13,10 +13,43 @@ enum {
     MV_DOCSTART, MV_DOCEND, MV_WORDLEFT, MV_WORDRIGHT
 };
 
-typedef struct Editor {
+typedef struct Editor Editor;
+
+/* Settings and search text shared by all the views. */
+typedef struct EdOptions {
+    int overwrite;
+    int autoindent;         /* Enter copies the leading whitespace */
+    int tabw;
+    int spaces;             /* Tab inserts spaces instead of a tab */
+    char find[256];
+    char repl[256];
+    int icase;
+} EdOptions;
+
+/* A file being edited, shown in one or more views (Editors). Each view has
+ * its own cursor, selection and scroll position; an edit in one moves the
+ * others' along with the text. */
+typedef struct Doc {
     Buffer *buf;
     Undo undo;
     char *path;             /* NULL for an untitled buffer */
+    Editor *views;          /* linked by Editor.next_view */
+
+    /* undo grouping state */
+    Editor *last_ed;        /* the view that edited last */
+    int last_kind;
+    int last_space;
+    unsigned long last_time;
+
+    void *data;             /* the UI's, freed with free_data when the
+                               last view lets go of the document */
+    void (*free_data)(void *data);
+} Doc;
+
+struct Editor {
+    Doc *doc;
+    Editor *next_view;      /* the next view of doc */
+    EdOptions *opt;
 
     long cy;                /* cursor line */
     size_t cx;              /* cursor byte column (visible part of the line) */
@@ -29,26 +62,23 @@ typedef struct Editor {
     long left;              /* first visible display column */
     int view_w, view_h;     /* text area size, set by the UI */
     int follow;             /* scroll to the cursor on next draw */
+    int moved;              /* moved since the last edit (undo grouping) */
 
-    int overwrite;
-    int autoindent;         /* Enter copies the leading whitespace */
-    int tabw;
-    int spaces;             /* Tab inserts spaces instead of a tab */
+    /* while another view edits: cursor, anchor and top line as offsets */
+    size_t o_cur, o_anc, o_top;
+};
 
-    /* undo grouping state */
-    int last_kind;
-    int last_space;
-    unsigned long last_time;
-    int moved;
-
-    char find[256];
-    char repl[256];
-    int icase;
-} Editor;
-
-void ed_init(Editor *ed);
+void ed_options_init(EdOptions *opt);
+/* Starts a view of a new empty document. */
+void ed_init(Editor *ed, EdOptions *opt);
+/* Starts another view of from's document, at the same place. */
+void ed_init_view(Editor *ed, const Editor *from);
+/* Lets go of the document, freeing it after its last view. */
 void ed_free(Editor *ed);
-/* Replaces the buffer with a new empty one. */
+/* How many views show ed's document. */
+int ed_views(const Editor *ed);
+/* Shows a new empty document, or the file at path, in this view. Other
+ * views keep the document shown before. */
 void ed_new(Editor *ed);
 int ed_open(Editor *ed, const char *path, char *err, size_t errlen);
 int ed_save(Editor *ed, const char *path, char *err, size_t errlen);
@@ -87,7 +117,7 @@ void ed_cut(Editor *ed);
 int ed_undo(Editor *ed);
 int ed_redo(Editor *ed);
 
-/* Search for ed->find. Returns 1 found, 2 found after wrapping, 0 not found. */
+/* Search for opt->find. Returns 1 found, 2 found after wrapping, 0 not found. */
 int ed_find(Editor *ed, int backward);
 int ed_replace(Editor *ed);
 long ed_replace_all(Editor *ed);
