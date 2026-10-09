@@ -149,6 +149,24 @@ static void test_moves(void)
     CHECK(starts(ln, "line 3000000 "));
 }
 
+#ifdef __APPLE__
+/* Cmd works as Ctrl. */
+static void test_cmd(void)
+{
+    open_file();
+    key(SDLK_END, KMOD_LGUI);
+    drain();
+    CHECK(ed()->cy == LINES && ed()->cx == 0);
+    key(SDLK_a, KMOD_RGUI);
+    CHECK(ed()->sel);
+    /* text that comes with Cmd held is a command, not text */
+    SDL_SetModState(KMOD_LGUI);
+    text("q");
+    SDL_SetModState(KMOD_NONE);
+    CHECK(!ed_modified(ed()));
+}
+#endif
+
 static void test_find(void)
 {
     size_t len, before;
@@ -333,6 +351,9 @@ int main(void)
     app.blink_next = (unsigned long)-1;
 
     test_moves();
+#ifdef __APPLE__
+    test_cmd();
+#endif
     test_find();
     test_replace_all();
     test_save();

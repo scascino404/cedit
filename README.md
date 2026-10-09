@@ -39,7 +39,7 @@ You need a C compiler, `make`, and the SDL2 development files:
 | Debian, Ubuntu | `sudo apt install build-essential clang libsdl2-dev` |
 | Fedora | `sudo dnf install make clang SDL2-devel` |
 | Arch | `sudo pacman -S base-devel clang sdl2` |
-| macOS | `brew install sdl2` |
+| macOS | `xcode-select --install`, then `brew install sdl2` |
 
 Then build it, and optionally install it:
 
@@ -76,6 +76,13 @@ A few keys to get started:
 
 Settings such as dark mode and text size are changed from the View and Edit
 menus, and cedit remembers them in `~/.config/cedit/cedit.conf`.
+
+On macOS, `Cmd` works as `Ctrl` as well, except where the system's own
+application menu answers first: `Cmd+Q` and `Cmd+W` exit (asking to save, as
+`Ctrl+Q` does), and `Cmd+H` hides the app. Use `Ctrl+W` and `Ctrl+H` for
+Close Window and Replace. macOS also takes `Ctrl+arrows` for Mission Control
+and Spaces by default, so word moves and scrolling with them need those
+shortcuts turned off in System Settings → Keyboard → Keyboard Shortcuts.
 
 ## License
 

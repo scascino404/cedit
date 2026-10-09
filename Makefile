@@ -77,7 +77,12 @@ tools: $(BUILD)/fontsheet $(BUILD)/uishot
 
 # benchmarks (see tests/bench.c), on files it generates into build/bench-data.
 # The frame's GPU-side SDL calls are wrapped into no-ops, and screen_present
-# is wrapped to time it.
+# is wrapped to time it. They need Linux: memory is read from /proc, and the
+# wrapping is GNU ld's --wrap.
+ifneq ($(shell uname -s),Linux)
+bench:
+	@echo "make bench needs Linux (it reads /proc and links with GNU ld's --wrap)"; exit 1
+else
 BENCH_DATA = $(BUILD)/bench-data
 BENCH_WRAP = -Wl,--wrap=screen_present,--wrap=SDL_RenderClear,--wrap=SDL_RenderCopy \
              -Wl,--wrap=SDL_RenderFillRect,--wrap=SDL_RenderPresent
@@ -89,6 +94,7 @@ $(BUILD)/bench: $(OBJ_DIR)/tests/bench.o $(LIB)
 # make bench BENCH_ARGS="-b base.tsv" (see tests/bench.c for the options)
 bench: $(BUILD)/bench
 	$(BUILD)/bench -d $(BENCH_DATA) $(BENCH_ARGS)
+endif
 
 # Compilation database for clangd / VSCode IntelliSense, recorded by bear
 # from a full rebuild of every target.
@@ -97,7 +103,8 @@ compdb:
 	bear --output $(BUILD)/compile_commands.json -- $(MAKE) all tests tools
 
 install: $(BUILD)/cedit
-	install -Dm755 $(BUILD)/cedit $(DESTDIR)$(PREFIX)/bin/cedit
+	mkdir -p $(DESTDIR)$(PREFIX)/bin
+	install -m755 $(BUILD)/cedit $(DESTDIR)$(PREFIX)/bin/cedit
 
 clean:
 	rm -rf $(OBJ_DIR) $(BUILD)/cedit $(BUILD)/test_buffer $(BUILD)/test_editor \

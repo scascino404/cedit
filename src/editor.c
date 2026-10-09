@@ -46,7 +46,9 @@ static void detach(Editor *ed)
 {
     Doc *d = ed->doc;
     Editor **p = &d->views;
+#ifdef __GLIBC__
     int big;
+#endif
 
     while (*p != ed)
         p = &(*p)->next_view;
@@ -59,7 +61,9 @@ static void detach(Editor *ed)
         return;
     if (d->free_data)
         d->free_data(d->data);
+#ifdef __GLIBC__
     big = buf_size(d->buf) + d->undo.mem > TRIM_SIZE;
+#endif
     buf_free(d->buf);
     undo_free(&d->undo);
     free(d->path);

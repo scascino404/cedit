@@ -94,6 +94,24 @@ static unsigned long now_ms(void)
     return (unsigned long)SDL_GetTicks();
 }
 
+/* On macOS, Cmd works as Ctrl, so Cmd+C, Cmd+S and the rest do what the
+ * Mac user expects (Ctrl still works too). */
+static SDL_Keymod cmd_as_ctrl(SDL_Keymod mod)
+{
+#ifdef __APPLE__
+    if (mod & KMOD_LGUI)
+        mod = (SDL_Keymod)(mod | KMOD_LCTRL);
+    if (mod & KMOD_RGUI)
+        mod = (SDL_Keymod)(mod | KMOD_RCTRL);
+#endif
+    return mod;
+}
+
+static SDL_Keymod mod_state(void)
+{
+    return cmd_as_ctrl(SDL_GetModState());
+}
+
 static void set_msg(App *a, const char *s1, const char *s2)
 {
     str_copy(a->msg, sizeof a->msg, s1);
@@ -1733,7 +1751,7 @@ static void mouse_motion(App *a, const SDL_MouseMotionEvent *m)
 static void mouse_wheel(App *a, const SDL_MouseWheelEvent *w)
 {
     int dy = w->y, dx = w->x;
-    SDL_Keymod mod = SDL_GetModState();
+    SDL_Keymod mod = mod_state();
     Window *under = win_at(a->root, a->mouse_x, a->mouse_y);
     Editor *ed = under ? &under->ed : &a->win->ed;
     if (w->direction == SDL_MOUSEWHEEL_FLIPPED) {
@@ -1873,9 +1891,12 @@ static void editor_key(App *a, const SDL_KeyboardEvent *k)
 
 static void key_down(App *a, const SDL_KeyboardEvent *k)
 {
+    SDL_KeyboardEvent folded = *k;
     SDL_Keycode sym = k->keysym.sym;
     int id;
 
+    folded.keysym.mod = (Uint16)cmd_as_ctrl((SDL_Keymod)k->keysym.mod);
+    k = &folded;
     if (sym == SDLK_LALT || sym == SDLK_RALT) {
         a->alt_tap = !k->repeat;
         return;
@@ -1972,7 +1993,7 @@ void app_event(App *a, const SDL_Event *e)
         break;
     case SDL_TEXTINPUT:
         /* Ctrl/Alt chords are commands, not text (AltGr is allowed) */
-        if (SDL_GetModState() & (KMOD_CTRL | KMOD_LALT))
+        if (mod_state() & (KMOD_CTRL | KMOD_LALT))
             break;
         wake_cursor(a);
         if (a->dlg.kind != DLG_NONE)
