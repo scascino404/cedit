@@ -53,8 +53,9 @@ int sys_load(const char *path, char **data, size_t *len, int *mapped,
             *mapped = 1;
         }
     }
-    if (!*data && !(S_ISREG(st.st_mode) && st.st_size == 0)) {
-        /* Not mappable (pipe, /proc, ...): read it into one heap block. */
+    if (!*data) {
+        /* Not mappable (pipe, /proc, whose files say they are empty, ...):
+         * read it into one heap block. */
         size_t cap = 65536, n = 0;
         char *d = (char *)xmalloc(cap);
         for (;;) {
