@@ -27,6 +27,8 @@ development files (`sdl2-config` must be on your `PATH`).
 make -j         # builds build/cedit
 make check      # builds and runs the buffer/undo/editor/syntax tests in build/
 make tools      # builds the review tools (build/fontsheet, build/uishot)
+make bench      # runs the benchmarks in tests/bench.c (about 1.5 min; makes
+                #   1.3 GB of test files in build/bench-data on first use)
 make compdb     # regenerates build/compile_commands.json with bear
 make install    # installs to /usr/local/bin (PREFIX=... to change)
 make clean      # removes the build outputs

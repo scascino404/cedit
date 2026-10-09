@@ -69,6 +69,27 @@ $(BUILD)/uishot: $(OBJ_DIR)/tests/uishot.o $(LIB)
 
 tools: $(BUILD)/fontsheet $(BUILD)/uishot
 
+# benchmarks (see tests/bench.c). The C and Markdown files are made from the
+# sources of a pinned commit, so that they stay the same as the code changes.
+# The frame's GPU-side SDL calls are wrapped into no-ops, and screen_present
+# is wrapped to time it.
+BENCH_REV  = ac8595c
+BENCH_DATA = $(BUILD)/bench-data
+BENCH_WRAP = -Wl,--wrap=screen_present,--wrap=SDL_RenderClear,--wrap=SDL_RenderCopy \
+             -Wl,--wrap=SDL_RenderFillRect,--wrap=SDL_RenderPresent
+
+$(BUILD)/bench: $(OBJ_DIR)/tests/bench.o $(LIB)
+	$(CC) $(CFLAGS) $(BENCH_WRAP) -o $@ $^ $(SDL_LIBS)
+
+$(BENCH_DATA)/seed:
+	mkdir -p $@
+	git archive $(BENCH_REV) src README.md limitations.md | tar -x -C $@
+
+# make bench BENCH_ARGS="-o base.tsv", then after a change
+# make bench BENCH_ARGS="-b base.tsv" (see tests/bench.c for the options)
+bench: $(BUILD)/bench $(BENCH_DATA)/seed
+	$(BUILD)/bench -d $(BENCH_DATA) $(BENCH_ARGS)
+
 # Compilation database for clangd / VSCode IntelliSense, recorded by bear
 # from a full rebuild of every target.
 compdb:
@@ -81,6 +102,6 @@ install: $(BUILD)/cedit
 clean:
 	rm -rf $(OBJ_DIR) $(BUILD)/cedit $(BUILD)/test_buffer $(BUILD)/test_editor \
 	       $(BUILD)/test_window $(BUILD)/test_syntax \
-	       $(BUILD)/fontsheet $(BUILD)/uishot
+	       $(BUILD)/fontsheet $(BUILD)/uishot $(BUILD)/bench
 
-.PHONY: all tests check tools compdb install clean
+.PHONY: all tests check tools bench compdb install clean
