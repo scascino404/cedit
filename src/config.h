@@ -13,6 +13,7 @@ typedef struct Config {
     int line_numbers;
     int tab_width;
     int highlight;      /* syntax highlighting */
+    int indent_spaces;  /* Tab inserts spaces */
 } Config;
 
 /* Fills c with the defaults, then whatever the config file overrides. */

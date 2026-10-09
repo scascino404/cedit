@@ -37,7 +37,8 @@ static const MenuItem m_edit[] = {
     {NULL, NULL, 0},
     {"Select &All", "Ctrl+A", CMD_SELALL},
     {"&Overwrite Mode", "Ins", CMD_OVERWRITE},
-    {"Auto &Indent", "", CMD_AUTOINDENT}
+    {"Auto &Indent", "", CMD_AUTOINDENT},
+    {"Indent with &Spaces", "", CMD_SPACES}
 };
 static const MenuItem m_search[] = {
     {"&Find...", "Ctrl+F", CMD_FIND},

@@ -581,8 +581,17 @@ void ed_tab(Editor *ed, int unindent, unsigned long now)
     size_t sx, ex;
     int had = ed_sel_range(ed, &sy, &sx, &ey, &ex);
 
+    char sp[16];
+
+    memset(sp, ' ', sizeof sp);
     if (!unindent && (!had || sy == ey)) {
-        ed_type(ed, "\t", 1, now);
+        size_t len;
+        const char *l = ed_line(ed, ed->cy, &len);
+        long d = ed_disp_col(ed, l, len, had ? sx : ed->cx);
+        if (ed->spaces)
+            ed_type(ed, sp, (size_t)(ed->tabw - d % ed->tabw), now);
+        else
+            ed_type(ed, "\t", 1, now);
         return;
     }
     if (!had) {
@@ -596,7 +605,10 @@ void ed_tab(Editor *ed, int unindent, unsigned long now)
         size_t off = pos_off(ed, ln, 0), len, k = 0;
         const char *l;
         if (!unindent) {
-            undo_insert(&ed->undo, ed->buf, off, "\t", 1, cur_off(ed));
+            if (ed->spaces)
+                undo_insert(&ed->undo, ed->buf, off, sp, (size_t)ed->tabw, cur_off(ed));
+            else
+                undo_insert(&ed->undo, ed->buf, off, "\t", 1, cur_off(ed));
             continue;
         }
         l = ed_line(ed, ln, &len);

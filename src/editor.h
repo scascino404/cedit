@@ -33,6 +33,7 @@ typedef struct Editor {
     int overwrite;
     int autoindent;         /* Enter copies the leading whitespace */
     int tabw;
+    int spaces;             /* Tab inserts spaces instead of a tab */
 
     /* undo grouping state */
     int last_kind;

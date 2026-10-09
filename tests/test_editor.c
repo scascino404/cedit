@@ -143,6 +143,20 @@ int main(void)
     ed_tab(&ed, 1, t += 2000);
     EXPECT(&ed, "a\nb\nc\n");
 
+    /* indent with spaces */
+    ed.spaces = 1;
+    ed_set_cursor(&ed, 0, 0, 0);
+    ed_set_cursor(&ed, 2, 0, 1);
+    ed_tab(&ed, 0, t += 2000);
+    EXPECT(&ed, "    a\n    b\nc\n");
+    ed_tab(&ed, 1, t += 2000);
+    EXPECT(&ed, "a\nb\nc\n");
+    ed_set_cursor(&ed, 0, 1, 0);
+    ed_tab(&ed, 0, t += 2000);
+    EXPECT(&ed, "a   \nb\nc\n");
+    CHECK(ed.cx == 4);
+    ed.spaces = 0;
+
     /* overwrite mode */
     open_text(&ed, "abcdef");
     ed.overwrite = 1;

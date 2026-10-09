@@ -829,6 +829,7 @@ static void save_settings(App *a)
     c.line_numbers = a->show_lnum;
     c.tab_width = a->ed.tabw;
     c.highlight = a->highlight;
+    c.indent_spaces = a->ed.spaces;
     config_save(&c);
 }
 
@@ -880,6 +881,8 @@ static int cmd_checked(App *a, int cmd)
         return a->dark;
     case CMD_AUTOINDENT:
         return a->ed.autoindent;
+    case CMD_SPACES:
+        return a->ed.spaces;
     case CMD_HIGHLIGHT:
         return a->highlight;
     }
@@ -948,6 +951,10 @@ static void command(App *a, int cmd)
         break;
     case CMD_AUTOINDENT:
         a->ed.autoindent = !a->ed.autoindent;
+        save_settings(a);
+        break;
+    case CMD_SPACES:
+        a->ed.spaces = !a->ed.spaces;
         save_settings(a);
         break;
     case CMD_HIGHLIGHT:
@@ -1631,6 +1638,7 @@ int app_init(App *a, int argc, char **argv)
     ed_init(&a->ed);
     a->ed.autoindent = cfg.autoindent;
     a->ed.tabw = cfg.tab_width;
+    a->ed.spaces = cfg.indent_spaces;
     a->show_lnum = cfg.line_numbers;
     a->dark = cfg.dark;
     a->highlight = cfg.highlight;
