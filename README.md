@@ -48,10 +48,6 @@ make -j                 # builds build/cedit
 sudo make install       # copies it to /usr/local/bin
 ```
 
-The Makefile uses clang; run `make CC=gcc` to build with gcc instead. cedit
-is developed and tested on Linux. Other Unix-like systems, macOS included,
-should work but haven't been tried.
-
 ## Run
 
 ```sh
