@@ -49,7 +49,7 @@ static const MenuItem m_search[] = {
 };
 static const MenuItem m_view[] = {
     {"&Small Text", "", CMD_SIZE_S},
-    {"&Normal Text", "", CMD_SIZE_N},
+    {"&Medium Text", "", CMD_SIZE_M},
     {"&Large Text", "Ctrl+0", CMD_SIZE_L},
     {NULL, NULL, 0},
     {"&Dark Mode", "", CMD_DARK},

@@ -8,7 +8,7 @@
 #include <string.h>
 
 Font font_8x8;
-Font font_8x16;
+Font font_20x20;
 
 #define MAX_GLYPHS 512
 
@@ -70,7 +70,7 @@ static const struct {
     {0x2567, 1, 0, 2, 2}
 };
 
-static unsigned char *glyph_ptr(Font *f, int i)
+static unsigned long *glyph_ptr(Font *f, int i)
 {
     return f->bits + (size_t)i * (size_t)f->h;
 }
@@ -85,7 +85,7 @@ static int add_glyph(Font *f, unsigned long cp)
         exit(1);
     }
     i = f->n++;
-    memset(glyph_ptr(f, i), 0, (size_t)f->h);
+    memset(glyph_ptr(f, i), 0, (size_t)f->h * sizeof *f->bits);
     if (cp < FONT_MAP_SIZE)
         f->map[cp] = (short)i;
     return i;
@@ -122,12 +122,12 @@ static void parse(Font *f, const char *const *src, const char *name)
             row = 0;
         } else if (g >= 0 && row < f->h) {
             int x;
-            unsigned char bits = 0;
+            unsigned long bits = 0;
             if ((int)strlen(s) != f->w)
                 fprintf(stderr, "cedit: %s: bad row \"%s\"\n", name, s);
             for (x = 0; x < f->w && s[x]; x++)
                 if (s[x] == '#')
-                    bits |= (unsigned char)(0x80 >> x);
+                    bits |= FONT_BIT(x);
             glyph_ptr(f, g)[row++] = bits;
         } else {
             fprintf(stderr, "cedit: %s: extra row \"%s\"\n", name, s);
@@ -136,82 +136,89 @@ static void parse(Font *f, const char *const *src, const char *name)
     f->placeholder = f->map[PLACEHOLDER_SLOT];
 }
 
-static void hline(unsigned char *g, int y, int x0, int x1)
+/* Box lines and shade dots are t px thick, t = 1 per 8 px of font width,
+ * so they keep the weight of the font's strokes. */
+static int line_weight(const Font *f)
 {
-    int x;
-    for (x = x0; x <= x1; x++)
-        g[y] |= (unsigned char)(0x80 >> x);
+    return f->w / 8;
 }
 
-static void vline(unsigned char *g, int x, int y0, int y1)
+/* Sets the t x t blocks from unit (x0, y0) to unit (x1, y1). */
+static void fill_units(unsigned long *g, int t, int x0, int y0, int x1,
+                       int y1)
 {
-    int y;
-    for (y = y0; y <= y1; y++)
-        g[y] |= (unsigned char)(0x80 >> x);
+    int x, y;
+    for (y = y0 * t; y < (y1 + 1) * t; y++)
+        for (x = x0 * t; x < (x1 + 1) * t; x++)
+            g[y] |= FONT_BIT(x);
 }
 
-/* Draws a box-drawing glyph from its arms so that joins always line up. */
+/* Draws a box-drawing glyph from its arms so that joins always line up.
+ * Coordinates are in units of the line weight. */
 static void make_box(Font *f, unsigned long cp, int up, int down, int left,
                      int right)
 {
-    unsigned char *g = glyph_ptr(f, add_glyph(f, cp));
-    int cx = 3, cy = f->h / 2 - 1, w = f->w - 1, h = f->h - 1;
+    unsigned long *g = glyph_ptr(f, add_glyph(f, cp));
+    int t = line_weight(f), w = f->w / t - 1, h = f->h / t - 1;
+    int cx = f->w / t / 2 - 1, cy = f->h / t / 2 - 1;
     int vd = up == 2 || down == 2, hd = left == 2 || right == 2;
 
     /* horizontal arms */
     if (right == 1)
-        hline(g, cy, vd ? cx + 1 : cx, w);
+        fill_units(g, t, vd ? cx + 1 : cx, cy, w, cy);
     if (left == 1)
-        hline(g, cy, 0, vd ? cx - 1 : cx);
+        fill_units(g, t, 0, cy, vd ? cx - 1 : cx, cy);
     if (right == 2) {
-        hline(g, cy - 1, up ? cx + 1 : down ? cx - 1 : cx, w);
-        hline(g, cy + 1, down ? cx + 1 : up ? cx - 1 : cx, w);
+        fill_units(g, t, up ? cx + 1 : down ? cx - 1 : cx, cy - 1, w, cy - 1);
+        fill_units(g, t, down ? cx + 1 : up ? cx - 1 : cx, cy + 1, w, cy + 1);
     }
     if (left == 2) {
-        hline(g, cy - 1, 0, up ? cx - 1 : down ? cx + 1 : cx);
-        hline(g, cy + 1, 0, down ? cx - 1 : up ? cx + 1 : cx);
+        fill_units(g, t, 0, cy - 1, up ? cx - 1 : down ? cx + 1 : cx, cy - 1);
+        fill_units(g, t, 0, cy + 1, down ? cx - 1 : up ? cx + 1 : cx, cy + 1);
     }
     /* vertical arms */
     if (down == 1)
-        vline(g, cx, hd ? cy + 1 : cy, h);
+        fill_units(g, t, cx, hd ? cy + 1 : cy, cx, h);
     if (up == 1)
-        vline(g, cx, 0, hd ? cy - 1 : cy);
+        fill_units(g, t, cx, 0, cx, hd ? cy - 1 : cy);
     if (down == 2) {
-        vline(g, cx - 1, left ? cy + 1 : right ? cy - 1 : cy, h);
-        vline(g, cx + 1, right ? cy + 1 : left ? cy - 1 : cy, h);
+        fill_units(g, t, cx - 1, left ? cy + 1 : right ? cy - 1 : cy, cx - 1, h);
+        fill_units(g, t, cx + 1, right ? cy + 1 : left ? cy - 1 : cy, cx + 1, h);
     }
     if (up == 2) {
-        vline(g, cx - 1, 0, left ? cy - 1 : right ? cy + 1 : cy);
-        vline(g, cx + 1, 0, right ? cy - 1 : left ? cy + 1 : cy);
+        fill_units(g, t, cx - 1, 0, cx - 1, left ? cy - 1 : right ? cy + 1 : cy);
+        fill_units(g, t, cx + 1, 0, cx + 1, right ? cy - 1 : left ? cy + 1 : cy);
     }
 }
 
 static void make_blocks(Font *f)
 {
-    int x, y;
-    unsigned char *g;
+    int y, half = f->h / 2, t = line_weight(f);
+    unsigned long full = 0, left = 0;
 
-    g = glyph_ptr(f, add_glyph(f, 0x2588));         /* full */
-    memset(g, 0xFF, (size_t)f->h);
-    g = glyph_ptr(f, add_glyph(f, 0x2580));         /* upper half */
-    memset(g, 0xFF, (size_t)f->h / 2);
-    g = glyph_ptr(f, add_glyph(f, 0x2584));         /* lower half */
-    memset(g + f->h / 2, 0xFF, (size_t)f->h / 2);
-    g = glyph_ptr(f, add_glyph(f, 0x258C));         /* left half */
-    memset(g, 0xF0, (size_t)f->h);
-    g = glyph_ptr(f, add_glyph(f, 0x2590));         /* right half */
-    memset(g, 0x0F, (size_t)f->h);
+    for (y = 0; y < f->w; y++) {
+        full |= FONT_BIT(y);
+        if (y < f->w / 2)
+            left |= FONT_BIT(y);
+    }
     for (y = 0; y < f->h; y++) {
-        unsigned char light = 0, medium = 0;
-        for (x = 0; x < 8; x++) {
-            if ((y % 2 == 0 && x % 4 == 0) || (y % 2 == 1 && x % 4 == 2))
-                light |= (unsigned char)(0x80 >> x);
-            if ((x + y) % 2 == 0)
-                medium |= (unsigned char)(0x80 >> x);
+        unsigned long light = 0, medium = 0;
+        int x, u = y / t;
+        for (x = 0; x < f->w; x++) {
+            int v = x / t;
+            if ((u % 2 == 0 && v % 4 == 0) || (u % 2 == 1 && v % 4 == 2))
+                light |= FONT_BIT(x);
+            if ((u + v) % 2 == 0)
+                medium |= FONT_BIT(x);
         }
+        glyph_ptr(f, add_glyph(f, 0x2588))[y] = full;
+        glyph_ptr(f, add_glyph(f, 0x2580))[y] = y < half ? full : 0;
+        glyph_ptr(f, add_glyph(f, 0x2584))[y] = y < half ? 0 : full;
+        glyph_ptr(f, add_glyph(f, 0x258C))[y] = left;
+        glyph_ptr(f, add_glyph(f, 0x2590))[y] = full & ~left;
         glyph_ptr(f, add_glyph(f, 0x2591))[y] = light;
         glyph_ptr(f, add_glyph(f, 0x2592))[y] = medium;
-        glyph_ptr(f, add_glyph(f, 0x2593))[y] = (unsigned char)~light;
+        glyph_ptr(f, add_glyph(f, 0x2593))[y] = full & ~light;
     }
 }
 
@@ -236,7 +243,7 @@ static void make_accented(Font *f, int lower_shift)
         g = add_glyph(f, compose[i].cp);
         shift = upper || compose[i].accent == ACC_CEDIL ? 0 : lower_shift;
         for (y = 0; y < f->h; y++) {
-            unsigned char a = y - shift >= 0 ? glyph_ptr(f, acc)[y - shift] : 0;
+            unsigned long a = y - shift >= 0 ? glyph_ptr(f, acc)[y - shift] : 0;
             glyph_ptr(f, g)[y] = glyph_ptr(f, base)[y] | a;
         }
     }
@@ -250,7 +257,7 @@ static void build(Font *f, int w, int h, const char *const *src,
     f->w = w;
     f->h = h;
     f->n = 0;
-    f->bits = (unsigned char *)calloc(MAX_GLYPHS, (size_t)h);
+    f->bits = (unsigned long *)calloc(MAX_GLYPHS, (size_t)h * sizeof *f->bits);
     for (i = 0; i < FONT_MAP_SIZE; i++)
         f->map[i] = -1;
     parse(f, src, name);
@@ -261,7 +268,7 @@ static void build(Font *f, int w, int h, const char *const *src,
     make_accented(f, lower_shift);
     if (f->map[0xAD] < 0 && f->map['-'] >= 0) {     /* soft hyphen */
         int g = add_glyph(f, 0xAD);
-        memcpy(glyph_ptr(f, g), glyph_ptr(f, f->map['-']), (size_t)h);
+        memcpy(glyph_ptr(f, g), glyph_ptr(f, f->map['-']), (size_t)h * sizeof *f->bits);
     }
     if (f->map[0xA0] < 0)                           /* no-break space */
         add_glyph(f, 0xA0);
@@ -272,7 +279,7 @@ static void build(Font *f, int w, int h, const char *const *src,
 void font_init(void)
 {
     build(&font_8x8, 8, 8, font8x8_src, "font8x8", 0);
-    build(&font_8x16, 8, 16, font8x16_src, "font8x16", 3);
+    build(&font_20x20, 20, 20, font20x20_src, "font20x20", 0);
 }
 
 int font_has(const Font *f, unsigned long cp)
@@ -283,7 +290,7 @@ int font_has(const Font *f, unsigned long cp)
     return cp < FONT_MAP_SIZE && f->map[cp] >= 0;
 }
 
-const unsigned char *font_glyph(const Font *f, unsigned long cp)
+const unsigned long *font_glyph(const Font *f, unsigned long cp)
 {
     int i = font_has(f, cp) ? f->map[cp] : f->placeholder;
     return f->bits + (size_t)i * (size_t)f->h;

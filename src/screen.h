@@ -24,7 +24,7 @@ enum {
 enum { TCUR_NONE, TCUR_INSERT, TCUR_OVERWRITE };
 
 /* Text sizes. */
-enum { SIZE_SMALL, SIZE_NORMAL, SIZE_LARGE, SIZE_COUNT };
+enum { SIZE_SMALL, SIZE_MEDIUM, SIZE_LARGE, SIZE_COUNT };
 
 /* The smallest grid the UI is laid out for. A smaller window gets the
  * grid cut off at its right and bottom edges. */
@@ -46,6 +46,7 @@ typedef struct Screen {
                                one does not fit MIN_COLS x MIN_ROWS */
     int hidpi;              /* output pixels per window unit */
     int scale;              /* output pixels per font pixel */
+    int ptr_scale;          /* output pixels per pointer pixel */
     int cols, rows;
     int cw, ch;             /* cell size in font pixels */
     int fb_w, fb_h;

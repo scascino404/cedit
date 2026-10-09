@@ -1,6 +1,6 @@
 /*
  * fontsheet.c - renders a font's glyphs and a text sample to a PPM image, for
- * reviewing the hand-drawn fonts.  usage: fontsheet 8|16 scale out.ppm
+ * reviewing the hand-drawn fonts.  usage: fontsheet 8|20 scale out.ppm
  */
 #include "../src/font.h"
 #include "../src/utf8.h"
@@ -45,11 +45,11 @@ int main(int argc, char **argv)
     FILE *fp;
 
     if (argc != 4) {
-        fprintf(stderr, "usage: fontsheet 8|16 scale out.ppm\n");
+        fprintf(stderr, "usage: fontsheet 8|20 scale out.ppm\n");
         return 1;
     }
     font_init();
-    f = atoi(argv[1]) == 8 ? &font_8x8 : &font_8x16;
+    f = atoi(argv[1]) == 20 ? &font_20x20 : &font_8x8;
     scale = atoi(argv[2]);
     for (rows = 0; sample[rows]; rows++)
         ;
@@ -65,13 +65,13 @@ int main(int argc, char **argv)
         int col = 0;
         while (pos < n && col < cols) {
             unsigned long cp;
-            const unsigned char *g;
+            const unsigned long *g;
             int x, y;
             pos += utf8_decode(s + pos, n - pos, &cp);
             g = font_glyph(f, cp);
             for (y = 0; y < f->h; y++)
                 for (x = 0; x < f->w; x++) {
-                    int on = (g[y] >> (7 - x)) & 1, sx, sy;
+                    int on = (g[y] & FONT_BIT(x)) != 0, sx, sy;
                     for (sy = 0; sy < scale; sy++)
                         for (sx = 0; sx < scale; sx++) {
                             int px = (1 + col * f->w + x) * scale + sx;

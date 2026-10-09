@@ -15,14 +15,15 @@ static const Uint32 palette[16] = {
     0xFFFF5555, 0xFFFF55FF, 0xFFFFFF55, 0xFFFFFFFF
 };
 
-/* Font and magnification for each text size, before HiDPI scaling. */
+/* Font, magnification and pointer magnification for each text size,
+ * before HiDPI scaling. The pointer is drawn at about the font's pixel size. */
 static const struct {
     const Font *font;
-    int mult;
+    int mult, ptr_mult;
 } sizes[SIZE_COUNT] = {
-    {&font_8x8, 1},
-    {&font_8x16, 1},
-    {&font_8x16, 2}
+    {&font_8x8, 2, 2},
+    {&font_20x20, 1, 2},
+    {&font_8x8, 3, 3}
 };
 
 int screen_init(Screen *s, int size)
@@ -112,6 +113,7 @@ void screen_layout(Screen *s)
     for (s->shown = s->size; ; s->shown--) {
         s->font = sizes[s->shown].font;
         s->scale = sizes[s->shown].mult * s->hidpi;
+        s->ptr_scale = sizes[s->shown].ptr_mult * s->hidpi;
         s->cw = s->font->w;
         s->ch = s->font->h;
         cols = s->out_w / (s->cw * s->scale);
@@ -260,16 +262,16 @@ int label_hotkey(const char *label)
 
 static void raster(Screen *s, int cx, int cy, const Cell *c)
 {
-    const unsigned char *g = font_glyph(s->font, c->ch);
+    const unsigned long *g = font_glyph(s->font, c->ch);
     Uint32 fg = palette[c->fg & 15], bg = palette[c->bg & 15];
     Uint32 *row = s->fb + (size_t)cy * s->ch * s->fb_w + (size_t)cx * s->cw;
     int x, y;
 
     for (y = 0; y < s->ch; y++, row += s->fb_w) {
-        unsigned char bits = g[y];
-        unsigned char mask = c->cur ? text_cursor_row(c->cur, s->ch, y) : 0;
+        unsigned long bits = g[y];
+        unsigned long mask = c->cur ? text_cursor_row(c->cur, s->ch, y) : 0;
         for (x = 0; x < s->cw; x++) {
-            unsigned char b = (unsigned char)(0x80 >> x);
+            unsigned long b = FONT_BIT(x);
             if (mask & b) {
                 /* block: ink on the cursor color; hollow box: a frame */
                 row[x] = c->cur == TCUR_INSERT
@@ -343,13 +345,13 @@ void screen_present(Screen *s)
     fill_rect(s, 0, dst.h, dst.w, s->out_h - dst.h,
               s->cells[(s->rows - 1) * s->cols].bg);
     if (s->ptr_visible && s->ptr_tex[s->ptr_kind]) {
-        /* same pixel size as the font, hot spot pixel under the mouse */
+        /* about the font's pixel size, hot spot pixel under the mouse */
         int k = s->ptr_kind;
         SDL_Rect r;
-        r.x = s->ptr_x - s->ptr_hx[k] * s->scale;
-        r.y = s->ptr_y - s->ptr_hy[k] * s->scale;
-        r.w = s->ptr_w[k] * s->scale;
-        r.h = s->ptr_h[k] * s->scale;
+        r.x = s->ptr_x - s->ptr_hx[k] * s->ptr_scale;
+        r.y = s->ptr_y - s->ptr_hy[k] * s->ptr_scale;
+        r.w = s->ptr_w[k] * s->ptr_scale;
+        r.h = s->ptr_h[k] * s->ptr_scale;
         SDL_RenderCopy(s->ren, s->ptr_tex[k], NULL, &r);
     }
     SDL_RenderPresent(s->ren);

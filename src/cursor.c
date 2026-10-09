@@ -92,25 +92,6 @@ Uint32 *pointer_pixels(int which, int *w, int *h, int *hx, int *hy)
 
 /* Text cursors. Insert mode is the solid TempleOS block; overwrite mode is a
  * hollow box, so the character being replaced stays readable. */
-static const char *const tc_overwrite16[16] = {
-    "########",
-    "########",
-    "##....##",
-    "##....##",
-    "##....##",
-    "##....##",
-    "##....##",
-    "##....##",
-    "##....##",
-    "##....##",
-    "##....##",
-    "##....##",
-    "##....##",
-    "##....##",
-    "########",
-    "########"
-};
-
 static const char *const tc_overwrite8[8] = {
     "########",
     "#......#",
@@ -122,19 +103,42 @@ static const char *const tc_overwrite8[8] = {
     "########"
 };
 
-unsigned char text_cursor_row(int shape, int h, int y)
+static const char *const tc_overwrite20[20] = {
+    "####################",
+    "####################",
+    "####################",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "###..............###",
+    "####################",
+    "####################",
+    "####################"
+};
+
+unsigned long text_cursor_row(int shape, int h, int y)
 {
     const char *row;
-    unsigned char bits = 0;
+    unsigned long bits = 0;
     int x;
 
     if (shape == TCUR_INSERT)
-        return 0xFF;
+        return 0xFFFFFFFFUL;
     if (shape != TCUR_OVERWRITE || y < 0 || y >= h)
         return 0;
-    row = h == 8 ? tc_overwrite8[y] : tc_overwrite16[y];
-    for (x = 0; x < 8; x++)
+    row = h == 20 ? tc_overwrite20[y] : tc_overwrite8[y];
+    for (x = 0; row[x]; x++)
         if (row[x] == '#')
-            bits |= (unsigned char)(0x80 >> x);
+            bits |= FONT_BIT(x);
     return bits;
 }

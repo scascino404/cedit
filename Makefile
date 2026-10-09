@@ -16,7 +16,7 @@ BUILD = build
 OBJ_DIR = $(BUILD)/obj
 
 CORE = editor buffer undo utf8 util
-APP  = main ui menu dialog theme screen font font8x8 font8x16 cursor config \
+APP  = main ui menu dialog theme screen font font8x8 font20x20 cursor config \
        syntax langs $(CORE)
 OBJ  = $(APP:%=$(OBJ_DIR)/%.o)
 LIB  = $(filter-out $(OBJ_DIR)/main.o,$(OBJ))
@@ -56,7 +56,7 @@ check: tests
 
 # review tools: render the fonts / drive the UI headlessly into images
 $(BUILD)/fontsheet: $(OBJ_DIR)/tests/fontsheet.o $(OBJ_DIR)/font.o \
-                    $(OBJ_DIR)/font8x8.o $(OBJ_DIR)/font8x16.o $(OBJ_DIR)/utf8.o
+                    $(OBJ_DIR)/font8x8.o $(OBJ_DIR)/font20x20.o $(OBJ_DIR)/utf8.o
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(BUILD)/uishot: $(OBJ_DIR)/tests/uishot.o $(LIB)

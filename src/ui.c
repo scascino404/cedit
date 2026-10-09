@@ -866,8 +866,8 @@ static int cmd_checked(App *a, int cmd)
         return a->ed.overwrite;
     case CMD_SIZE_S:
         return a->scr.size == SIZE_SMALL;
-    case CMD_SIZE_N:
-        return a->scr.size == SIZE_NORMAL;
+    case CMD_SIZE_M:
+        return a->scr.size == SIZE_MEDIUM;
     case CMD_SIZE_L:
         return a->scr.size == SIZE_LARGE;
     case CMD_LINENUM:
@@ -928,7 +928,7 @@ static void command(App *a, int cmd)
     case CMD_REPLACE:   find_dialog(a, 1); break;
     case CMD_GOTO:      goto_dialog(a); break;
     case CMD_SIZE_S:    set_size(a, SIZE_SMALL); break;
-    case CMD_SIZE_N:    set_size(a, SIZE_NORMAL); break;
+    case CMD_SIZE_M:    set_size(a, SIZE_MEDIUM); break;
     case CMD_SIZE_L:    set_size(a, SIZE_LARGE); break;
     case CMD_LINENUM:
         a->show_lnum = !a->show_lnum;

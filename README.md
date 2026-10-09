@@ -5,8 +5,10 @@ editor, inspired by TempleOS and MS-DOS EDIT. It has a menu bar, a
 double-line window frame, a blinking block cursor, the 16-color VGA palette,
 and fonts and mouse pointers drawn by hand.
 
-![cedit](docs/screenshot.png)
-![cedit in dark mode](docs/screenshot-dark.png)
+<p>
+  <img src="docs/screenshot.png" alt="cedit" width="49%">
+  <img src="docs/screenshot-dark.png" alt="cedit in dark mode" width="49%">
+</p>
 
 - **Modeless and simple:** you just type. Commands use the familiar `Ctrl`
   shortcuts and a menu bar you can drive with the mouse or the keyboard.
@@ -69,7 +71,7 @@ Settings are changed from the menus and remembered across sessions in
 
 | Setting | Menu | Default |
 |---|---|---|
-| Text size | View → Small / Normal / Large Text | Large |
+| Text size | View → Small / Medium / Large Text | Large |
 | Dark mode | View → Dark Mode | off |
 | Line numbers | View → Line Numbers | off |
 | Tab width | View → Tab Width 4 / 8 | 4 |
@@ -117,7 +119,7 @@ Settings are changed from the menus and remembered across sessions in
 | `src/theme.c` | The light and dark color themes |
 | `src/syntax.c` | Syntax highlighting: the rule-driven lexer, language detection, and the cache of lexer states at line starts |
 | `src/langs.c` | The language definitions: rules and word lists for each language |
-| `src/font8x8.c`, `src/font8x16.c` | The two hand-drawn fonts, as ASCII art |
+| `src/font8x8.c`, `src/font20x20.c` | The hand-drawn "Temple" font at 8×8 and 20×20, as ASCII art |
 | `src/font.c` | Builds the glyph tables: box drawing from stroke rules, accented Latin-1 letters by composition |
 | `src/cursor.c` | Hand-drawn mouse pointers (the TempleOS arrow, I-beam, hourglass) and text cursor shapes |
 | `src/config.c` | Loads and saves the settings file, driven by one table of keys |
@@ -144,9 +146,14 @@ Settings are changed from the menus and remembered across sessions in
 
 ### Text sizes
 
-- **Small:** the 8×8 "Temple" font
-- **Normal:** the 8×16 "VGA" font
-- **Large** (the default): the 8×16 font doubled
+All sizes use the "Temple" font, drawn after TempleOS's 8×8 font. Like
+TempleOS's, its letters fill the cell with no gap between lines, so a
+screen holds many lines for the size of the letters.
+
+- **Small:** the 8×8 font doubled (16 px lines)
+- **Medium:** the same design redrawn at 2.5× as a 20×20 font (20 px
+  lines), which matches TempleOS full screen on a 1200-pixel-tall display
+- **Large** (the default): the 8×8 font tripled (24 px lines)
 
 All three are multiplied by the display's HiDPI factor, so the pixels stay
 crisp and square.
@@ -165,8 +172,8 @@ with DOS (CRLF) line endings stay CRLF.
 
 ### Mouse pointer
 
-cedit draws its pointer itself, on top of its own frame, at the same pixel
-size as the font. The system pointer is hidden while the mouse is over the
+cedit draws its pointer itself, on top of its own frame, at about the pixel
+size of the font. The system pointer is hidden while the mouse is over the
 window. Pointer images handed to the OS get resized by the compositor at
 fractional display scales (such as 1.25×), which blurs pixel art; drawing it
 ourselves keeps it exactly as sharp as the text. The trade-offs are about one
@@ -208,7 +215,7 @@ table in `src/theme.c`.
 
 ```sh
 make tools
-build/fontsheet 16 4 sheet.ppm            # render a font sample sheet
+build/fontsheet 8 4 sheet.ppm             # render a font sample sheet (8 or 20)
 SDL_VIDEODRIVER=offscreen build/uishot shot file.txt k:F10 s
                                           # drive the UI headlessly, save screenshots
                                           # (tokens are listed in tests/uishot.c)

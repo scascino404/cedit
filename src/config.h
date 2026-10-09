@@ -7,7 +7,7 @@
 #define CEDIT_CONFIG_H
 
 typedef struct Config {
-    int size;           /* SIZE_SMALL, SIZE_NORMAL, SIZE_LARGE */
+    int size;           /* SIZE_SMALL, SIZE_MEDIUM, SIZE_LARGE */
     int dark;
     int autoindent;
     int line_numbers;

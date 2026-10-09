@@ -30,7 +30,7 @@ static const struct {
 };
 #define NKEYS (sizeof keys / sizeof keys[0])
 
-static const char *const size_names[SIZE_COUNT] = {"small", "normal", "large"};
+static const char *const size_names[SIZE_COUNT] = {"small", "medium", "large"};
 
 static int *field(Config *c, size_t i)
 {
@@ -46,6 +46,8 @@ static int parse_value(int type, const char *val)
         for (k = 0; k < SIZE_COUNT; k++)
             if (strcmp(val, size_names[k]) == 0)
                 return k;
+    if (type == SIZE && strcmp(val, "normal") == 0)
+        return SIZE_SMALL;      /* the old 8x16 size, same line height */
     return atoi(val);
 }
 
