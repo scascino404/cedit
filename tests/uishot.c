@@ -22,8 +22,15 @@ static App app;
 static int shots;
 static const char *prefix;
 
+/* Draws, after the searches and saves going on are over (a save's last
+ * part runs on a thread), so that each step shows where they end. */
 static void frame(void)
 {
+    while (app.job || app.save) {
+        app_tick(&app);
+        if (app.save_thread)
+            SDL_Delay(1);
+    }
     app_draw(&app);
 }
 

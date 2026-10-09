@@ -33,6 +33,9 @@ typedef struct Buffer {
     size_t c_off0;      /* byte offset of c_leaf */
     long c_ln;          /* last line looked up inside c_leaf ... */
     size_t c_pos;       /* ... and its offset inside the leaf */
+
+    unsigned long changes;  /* bumped on every insert or delete (not on
+                               loading, unlike gen) */
 } Buffer;
 
 Buffer *buf_new(void);
@@ -64,13 +67,40 @@ void buf_delete(Buffer *b, size_t off, size_t n);
 /* Copies n bytes at off into dst. */
 void buf_copy(Buffer *b, size_t off, size_t n, char *dst);
 
-/* Finds pat (no newlines): forward, the first match starting in
- * [from, to); backward, the last one starting in [to, from]. Returns the
- * match offset or (size_t)-1. */
+/* Finds pat (no newlines) in the part loaded so far: forward, the first
+ * match starting in [from, to); backward, the last one starting in
+ * [to, from]. Returns the match offset or (size_t)-1. */
 size_t buf_find(Buffer *b, size_t from, size_t to, const char *pat,
                 size_t plen, int icase, int backward);
 
+/* Saves the whole buffer (loading the rest first): to a temporary file
+ * renamed over path, or by overwriting path where that can't be made. */
 int buf_save(Buffer *b, const char *path, char *err, size_t errlen);
+
+/*
+ * Saving in steps, which buf_save does all at once. buf_save_step loads
+ * the rest of the file (and, to overwrite it in place, copies the text
+ * that borrows from it) a slice at a time. buf_save_end writes the file
+ * and makes it durable (fsync, rename): the part whose time can't be
+ * bounded, since the system can make a writer wait for the disk. It only
+ * reads the buffer, so it can run on another thread while the buffer
+ * doesn't change.
+ */
+typedef struct BufSave BufSave;
+
+/* Starts saving b to path. Returns NULL, with a message in err, if it
+ * can't. */
+BufSave *buf_save_begin(Buffer *b, const char *path, char *err, size_t errlen);
+/* Loads or copies about budget more bytes. Returns 1 while there is more
+ * to do, 0 when what is left is buf_save_end, -1 on an error. */
+int buf_save_step(BufSave *s, size_t budget);
+/* Returns 0, or -1 on an error. */
+int buf_save_end(BufSave *s);
+/* What went wrong, after -1 from buf_save_step or buf_save_end. */
+const char *buf_save_error(const BufSave *s);
+/* Frees s. A save that didn't end leaves the file as it was (except when
+ * overwriting in place, which has started). */
+void buf_save_free(BufSave *s);
 
 /* For tests: verifies all tree invariants, returns 0 when consistent. */
 int buf_check(Buffer *b);

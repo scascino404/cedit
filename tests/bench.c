@@ -7,8 +7,8 @@
  * Each scenario runs in its own process (so memory is measured per
  * scenario), runs times, and reports the median of each metric. -o saves
  * the results, -b compares with saved ones. A scenario argument runs only
- * the scenarios whose name starts with it ("log" runs log.open, log.find
- * and log.edit).
+ * the scenarios whose name starts with it ("log" runs log.open, log.find,
+ * log.replace and log.edit).
  *
  * The files are generated into dir (build/bench-data) on first use: C and
  * Markdown from the sources in dir/seed (the Makefile extracts them from a
@@ -16,7 +16,10 @@
  * and JSON. They take about 1.3 GB.
  *
  * Frames are timed from the input event to the end of drawing, as the main
- * loop does them (event, app_tick, app_draw). The SDL calls that scale and
+ * loop does them (event, app_tick, app_draw). Searches, Replace All, saves
+ * and moves that wait for loading go on over many frames: for those, the
+ * metric is the time until they are over, and metric_frame the longest
+ * frame meanwhile. The SDL calls that scale and
  * show the frame are replaced by no-ops (the Makefile links with --wrap):
  * on a real display the GPU does that work, and the offscreen software
  * renderer would only add noise. Rasterizing the changed cells and the
@@ -191,6 +194,39 @@ static void settle(void)
     app.blink_next = (unsigned long)-1;
     while (app_timeout(&app) == 0)
         frame();
+}
+
+/* Runs the main loop until the job and the save going on are over, and
+ * returns how long that took. While the last part of a save runs on its
+ * thread, the main loop sleeps; the frames go into *worst. */
+static double finish(double *worst)
+{
+    double t0 = now(), t;
+    while (app.job || app.save) {
+        if (app.save_thread && !SDL_AtomicGet(&app.save_ended)) {
+            SDL_Delay(1);
+            continue;
+        }
+        t = now();
+        frame();
+        t = now() - t;
+        if (t > *worst)
+            *worst = t;
+    }
+    return now() - t0;
+}
+
+/* Reports the time from t0 until the work going on is over as metric,
+ * and the longest frame, counting the one that started at t0, as
+ * metric_frame. */
+static void report_work(const char *metric, double t0)
+{
+    char name[128];
+    double worst = now() - t0;
+    finish(&worst);
+    report(metric, now() - t0, "ms");
+    sprintf(name, "%s_frame", metric);
+    report(name, worst, "ms");
 }
 
 static void key(SDL_Keycode sym, Uint16 mod)
@@ -388,7 +424,7 @@ static void sc_log_open(void)
     t = now();
     key(SDLK_END, KMOD_LCTRL);
     frame();
-    report("ctrl_end", now() - t, "ms");
+    report_work("ctrl_end", t);
     report_anon("anon");
     report("file_rss", status_mb("RssFile"), "MB");
     report("close", close_file(), "ms");
@@ -409,22 +445,47 @@ static void sc_log_find(void)
     t = now();
     key(SDLK_F3, 0);
     frame();
-    report("find_miss", now() - t, "ms");
+    report_work("find_miss", t);
     app.opt.icase = 1;
     t = now();
     key(SDLK_F3, 0);
     frame();
-    report("find_miss_icase", now() - t, "ms");
+    report_work("find_miss_icase", t);
     close_file();
     stop();
 }
 
+/* Replace All in the 1 GB log, from the Replace dialog, of text on about
+ * one line in 5000. */
+static void sc_log_replace(void)
+{
+    double t;
+    start();
+    open_file("huge.log");
+    settle();
+    strcpy(app.opt.find, "dur=499.9ms");
+    strcpy(app.opt.repl, "dur=500.0ms");
+    app.opt.icase = 0;
+    key(SDLK_h, KMOD_LCTRL);
+    frame();
+    t = now();
+    key(SDLK_a, KMOD_LALT);     /* Replace All */
+    frame();
+    report_work("replace_all", t);
+    report("matches", (double)app.repl.count, "count");
+    report_anon("anon");
+    key(SDLK_ESCAPE, 0);
+    report("close", close_file(), "ms");
+    stop();
+}
+
 /* Edits scattered over the 1 GB log (each a jump and a typed character),
- * then saving it and closing it. */
+ * then saving it (Ctrl+S, as if it had been opened from out.tmp) and
+ * closing it. */
 static void sc_log_edit(void)
 {
     Samples s = {0};
-    char out[4096], err[256];
+    char out[4096];
     double t;
     long n;
     int i;
@@ -444,13 +505,16 @@ static void sc_log_edit(void)
     report_lat("edit", &s);
     report_anon("anon");
     path_of(out, "out.tmp");
+    free(ed()->doc->path);
+    ed()->doc->path = xstrdup(out);
     t = now();
-    if (ed_save(ed(), out, err, sizeof err) < 0) {
-        fprintf(stderr, "bench: save: %s\n", err);
+    key(SDLK_s, KMOD_LCTRL);
+    frame();
+    report_work("save", t);
+    if (ed_modified(ed())) {
+        fprintf(stderr, "bench: %s was not saved\n", out);
         exit(1);
     }
-    frame();
-    report("save", now() - t, "ms");
     report("close", close_file(), "ms");
     report_anon("anon_after_close");
     unlink(out);
@@ -467,7 +531,7 @@ static void sc_bigc_open(void)
     t = now();
     key(SDLK_END, KMOD_LCTRL);
     frame();
-    report("ctrl_end", now() - t, "ms");
+    report_work("ctrl_end", t);
     t = now();
     settle();
     report("hl_catchup", now() - t, "ms");
@@ -734,6 +798,7 @@ static const Scenario scenarios[] = {
     {"small", sc_small},
     {"log.open", sc_log_open},
     {"log.find", sc_log_find},
+    {"log.replace", sc_log_replace},
     {"log.edit", sc_log_edit},
     {"bigc.open", sc_bigc_open},
     {"bigc.split", sc_bigc_split},

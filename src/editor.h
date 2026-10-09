@@ -101,6 +101,8 @@ int ed_views(const Editor *ed);
 void ed_new(Editor *ed);
 int ed_open(Editor *ed, const char *path, char *err, size_t errlen);
 int ed_save(Editor *ed, const char *path, char *err, size_t errlen);
+/* Marks the document saved as path, after a save done in steps. */
+void ed_set_saved(Editor *ed, const char *path);
 int ed_modified(const Editor *ed);
 const char *ed_name(const Editor *ed);
 
@@ -170,8 +172,53 @@ int ed_redo(Editor *ed);
 
 /* Search for opt->find. Returns 1 found, 2 found after wrapping, 0 not found. */
 int ed_find(Editor *ed, int backward);
+/* Replaces the selection with opt->repl if it is a match. Returns 1 if it
+ * was. */
+int ed_replace_selection(Editor *ed);
+/* ed_replace_selection, then ed_find forward. */
 int ed_replace(Editor *ed);
 long ed_replace_all(Editor *ed);
 void ed_goto(Editor *ed, long line);
+
+/*
+ * ed_find and ed_replace_all a slice at a time, for big files: each step
+ * searches about `bytes` more, loading more of the file when it gets to
+ * the end of what is loaded. The document must not change between steps
+ * except by the steps themselves.
+ */
+typedef struct EdSearch {
+    char pat[256];          /* opt->find when it started */
+    size_t plen;
+    int icase, backward;
+    int pass;               /* 0 from the start on, 1 the rest after
+                               wrapping, 2 over */
+    size_t start;           /* where it started */
+    size_t pos;             /* where the next slice starts */
+    size_t done;            /* bytes searched */
+} EdSearch;
+
+void ed_find_begin(Editor *ed, EdSearch *s, int backward);
+/* Returns -1 while the search goes on, else as ed_find. */
+int ed_find_step(Editor *ed, EdSearch *s, size_t bytes);
+
+typedef struct EdReplace {
+    char pat[256], repl[256];
+    size_t plen, rlen;
+    int icase;
+    size_t pos;             /* where the next slice searches from */
+    size_t mark;            /* the end of the last replacement */
+    size_t cur;             /* the cursor when it started, for undo */
+    long count;             /* replacements so far */
+    int over;
+} EdReplace;
+
+/* Starts the undo step that all the replacements go to. */
+void ed_replace_all_begin(Editor *ed, EdReplace *r);
+/* Returns 1 while there is more to search, 0 when all is replaced. */
+int ed_replace_all_step(Editor *ed, EdReplace *r, size_t bytes);
+
+/* The share of the document searched by a step-wise search or Replace All,
+ * from 0 to 1. */
+double ed_search_progress(Editor *ed, size_t done);
 
 #endif

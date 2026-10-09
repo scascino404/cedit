@@ -50,13 +50,19 @@ $(BUILD)/test_syntax: $(OBJ_DIR)/tests/test_syntax.o $(OBJ_DIR)/syntax.o $(OBJ_D
                       $(OBJ_DIR)/buffer.o $(OBJ_DIR)/util.o
 	$(CC) $(CFLAGS) -o $@ $^
 
-tests: $(BUILD)/test_buffer $(BUILD)/test_editor $(BUILD)/test_window $(BUILD)/test_syntax
+# drives the real UI headlessly (SDL's offscreen video driver)
+$(BUILD)/test_ui: $(OBJ_DIR)/tests/test_ui.o $(LIB)
+	$(CC) $(CFLAGS) -o $@ $^ $(SDL_LIBS)
+
+tests: $(BUILD)/test_buffer $(BUILD)/test_editor $(BUILD)/test_window $(BUILD)/test_syntax \
+       $(BUILD)/test_ui
 
 check: tests
 	$(BUILD)/test_buffer
 	$(BUILD)/test_editor
 	$(BUILD)/test_window
 	$(BUILD)/test_syntax
+	$(BUILD)/test_ui
 
 # review tools: render the fonts / drive the UI headlessly into images
 $(BUILD)/fontsheet: $(OBJ_DIR)/tests/fontsheet.o $(OBJ_DIR)/font.o \
@@ -101,7 +107,7 @@ install: $(BUILD)/cedit
 
 clean:
 	rm -rf $(OBJ_DIR) $(BUILD)/cedit $(BUILD)/test_buffer $(BUILD)/test_editor \
-	       $(BUILD)/test_window $(BUILD)/test_syntax \
+	       $(BUILD)/test_window $(BUILD)/test_syntax $(BUILD)/test_ui \
 	       $(BUILD)/fontsheet $(BUILD)/uishot $(BUILD)/bench
 
 .PHONY: all tests check tools bench compdb install clean

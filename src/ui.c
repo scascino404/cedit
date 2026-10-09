@@ -27,6 +27,8 @@
 #define INPUT_MS   1        /* ... in a frame that shows input */
 #define LOAD_SLICE ((size_t)4 * 1024 * 1024)    /* ... done in slices */
 #define LEX_SLICE  ((size_t)512 * 1024)
+#define FIND_SLICE ((size_t)1024 * 1024)
+#define SAVE_SLICE ((size_t)2 * 1024 * 1024)
 
 /* actions that wait for "save changes?" */
 enum { P_NONE, P_QUIT, P_NEW, P_OPEN, P_OPEN_PATH, P_CLOSE };
@@ -55,6 +57,7 @@ static const char *const help_lines[] = {
     "",
     "Ctrl+F  Find           F3 / Shift+F3  Next / previous",
     "Ctrl+H  Replace        Ctrl+G  Go to line",
+    "Esc     Stop a search or Replace All",
     "",
     "Shift+arrows  Select   Ctrl+arrows  Word / scroll",
     "Home / End    Line     Ctrl+Home / End  File",
@@ -227,6 +230,193 @@ static void finish_loading(App *a)
     Buffer *b = a->win->ed.doc->buf;
     if (buf_loading(b))
         buf_load_all(b);
+}
+
+/* The performance counter ms milliseconds from now, and whether it is
+ * still before t. */
+static Uint64 deadline(int ms)
+{
+    return SDL_GetPerformanceCounter() + SDL_GetPerformanceFrequency() * (Uint64)ms / 1000;
+}
+
+static int before(Uint64 t)
+{
+    return SDL_GetPerformanceCounter() < t;
+}
+
+/* Why the focused window's document can't change now, or NULL. */
+static const char *edit_blocked(App *a)
+{
+    Doc *d = a->win->ed.doc;
+    if (a->save && a->save_doc == d)
+        return "Saving: no changes until the file is saved";
+    if (a->job == J_REPLACE && a->job_win->ed.doc == d)
+        return "Replace All is running (Esc stops it)";
+    return NULL;
+}
+
+/* Whether the focused window's document may change; if not, says why. */
+static int may_edit(App *a)
+{
+    const char *why = edit_blocked(a);
+    if (why)
+        set_msg(a, why, NULL);
+    return !why;
+}
+
+/* ------------------------------------------------------------------ */
+/* jobs: a search, Replace All, or a move waiting for the file to load */
+/* ------------------------------------------------------------------ */
+
+static void take_spot(App *a)
+{
+    Editor *ed = &a->job_win->ed;
+    a->job_spot.doc = ed->doc;
+    a->job_spot.changes = ed->doc->buf->changes;
+    a->job_spot.cy = ed->cy;
+    a->job_spot.cx = ed->cx;
+    a->job_spot.sel = ed->sel;
+    a->job_spot.ay = ed->ay;
+    a->job_spot.ax = ed->ax;
+}
+
+/* Whether the job's window still has the focus, its document, and the
+ * cursor, selection and text it had when the job started. */
+static int spot_same(App *a)
+{
+    Editor *ed = &a->job_win->ed;
+    return a->win == a->job_win && ed->doc == a->job_spot.doc &&
+           ed->doc->buf->changes == a->job_spot.changes &&
+           ed->cy == a->job_spot.cy && ed->cx == a->job_spot.cx &&
+           ed->sel == a->job_spot.sel &&
+           (!ed->sel || (ed->ay == a->job_spot.ay && ed->ax == a->job_spot.ax));
+}
+
+/* Stops the job, saying so if say is set. Replace All keeps what it has
+ * replaced, as one undo step. */
+static void stop_job(App *a, int say)
+{
+    char num[96];
+    if (say && a->job == J_REPLACE) {
+        sprintf(num, "Replace All stopped after %ld replacement%s", a->repl.count,
+                a->repl.count == 1 ? "" : "s");
+        set_msg(a, num, NULL);
+    } else if (say && a->job == J_FIND) {
+        set_msg(a, "Search stopped", NULL);
+    }
+    a->job = J_NONE;
+}
+
+/* Starts a job in the focused window, in place of a search or move going
+ * on. Returns 0, and says why, while Replace All runs. */
+static int start_job(App *a, int kind)
+{
+    if (a->job == J_REPLACE) {
+        set_msg(a, "Replace All is running (Esc stops it)", NULL);
+        return 0;
+    }
+    a->job = kind;
+    a->job_win = a->win;
+    a->msg_until = 0;           /* the bottom border shows the progress */
+    take_spot(a);
+    return 1;
+}
+
+/* Shows the result of a search: the match, in the upper part of the
+ * window (above a find/replace dialog), or a message. */
+static void show_found(App *a, int r)
+{
+    Editor *ed = &a->win->ed;
+    long row, x;
+    int h;
+
+    if (!r) {
+        set_msg(a, "Not found: ", a->search.pat);
+        return;
+    }
+    if (r == 2)
+        set_msg(a, a->search.backward ? "Search wrapped to the end"
+                                      : "Search wrapped to the top", NULL);
+    h = sync_view(a, a->win).h;
+    ed_scroll_to_cursor(ed);
+    ed_cursor_spot(ed, &row, &x);
+    if (row > h / 2)
+        ed_scroll_cursor_to(ed, h / 3);
+}
+
+/* Works on the job until it is done or the time is up. */
+static void job_steps(App *a, Uint64 end)
+{
+    Editor *ed;
+    Buffer *b;
+    char num[64];
+    int r;
+
+    if (!a->job)
+        return;
+    ed = &a->job_win->ed;
+    b = ed->doc->buf;
+    if (a->job != J_REPLACE && !spot_same(a)) {
+        stop_job(a, 0);
+        return;
+    }
+    switch (a->job) {
+    case J_FIND:
+        do
+            r = ed_find_step(ed, &a->search, FIND_SLICE);
+        while (r < 0 && before(end));
+        if (r >= 0) {
+            a->job = J_NONE;
+            show_found(a, r);
+        }
+        break;
+    case J_REPLACE:
+        do
+            r = ed_replace_all_step(ed, &a->repl, FIND_SLICE);
+        while (r && before(end));
+        if (!r) {
+            a->job = J_NONE;
+            sprintf(num, "Replaced %ld occurrence%s", a->repl.count,
+                    a->repl.count == 1 ? "" : "s");
+            set_msg(a, num, NULL);
+        }
+        break;
+    default:
+        /* a move to a line, or to the end, once it is loaded */
+        while (buf_loading(b) && (a->job != J_GOTO || ed_lines(ed) <= a->job_line) &&
+               before(end))
+            buf_load_step(b, LOAD_SLICE);
+        if (buf_loading(b) && (a->job != J_GOTO || ed_lines(ed) <= a->job_line))
+            break;
+        r = a->job;
+        a->job = J_NONE;
+        if (r == J_GOTO)
+            ed_goto(ed, a->job_line);
+        else if (r == J_DOCEND)
+            ed_move(ed, MV_DOCEND, a->job_extend);
+        else
+            ed_select_all(ed);
+    }
+}
+
+/* Does a move that needs the file loaded up to a line (J_GOTO) or to its
+ * end: now if it is, or else as a job, once it is. */
+static void move_loaded(App *a, int kind, long line, int extend)
+{
+    Editor *ed = &a->win->ed;
+    if (buf_loading(ed->doc->buf) && start_job(a, kind)) {
+        a->job_line = line;
+        a->job_extend = extend;
+        job_steps(a, deadline(WORK_MS));
+        return;
+    }
+    finish_loading(a);          /* loading only while Replace All runs */
+    if (kind == J_GOTO)
+        ed_goto(ed, line);
+    else if (kind == J_DOCEND)
+        ed_move(ed, MV_DOCEND, extend);
+    else
+        ed_select_all(ed);
 }
 
 /* ------------------------------------------------------------------ */
@@ -471,18 +661,31 @@ static void do_open_path(App *a, const char *path)
     set_msg(a, r == 1 ? "New file: " : "Opened ", ed_name(ed));
 }
 
-static int do_save_path(App *a, const char *path)
+static void save_steps(App *a, Uint64 end);
+
+/* Starts saving the focused window's document to path. The save goes on
+ * in app_tick, and save_done ends it. Returns -1 if it can't start. */
+static int start_save(App *a, const char *path)
 {
     Editor *ed = &a->win->ed;
-    char err[256], info[64];
-    if (ed_save(ed, path, err, sizeof err) < 0) {
+    char err[256];
+
+    if (a->save) {
+        set_msg(a, "Wait until the file is saved", NULL);
+        return -1;
+    }
+    if (a->job == J_REPLACE && a->job_win->ed.doc == ed->doc) {
+        set_msg(a, "Replace All is running (Esc stops it)", NULL);
+        return -1;
+    }
+    a->save = buf_save_begin(ed->doc->buf, path, err, sizeof err);
+    if (!a->save) {
         message_dialog(a, "Cannot save", path, err);
         return -1;
     }
-    detect_syntax(ed);
-    sprintf(info, " (%ld lines)", ed_lines(ed));
-    set_msg(a, "Saved ", ed_name(ed));
-    str_cat(a->msg, sizeof a->msg, info);
+    a->save_doc = ed->doc;
+    str_copy(a->save_path, sizeof a->save_path, path);
+    save_steps(a, deadline(WORK_MS));
     return 0;
 }
 
@@ -557,6 +760,17 @@ static void run_pending(App *a)
 static void guard(App *a, int action, const char *path)
 {
     Editor *ed = &a->win->ed;
+    if (a->save) {
+        /* the documents stay until the save is over; exiting waits */
+        if (action == P_QUIT) {
+            a->save_quit = 1;
+            set_msg(a, "Exiting when the file is saved", NULL);
+        } else {
+            set_msg(a, "Wait until the file is saved", NULL);
+        }
+        return;
+    }
+    stop_job(a, 0);
     a->pending = action;
     str_copy(a->pending_path, sizeof a->pending_path, path ? path : "");
     if (action == P_QUIT) {
@@ -571,12 +785,10 @@ static void guard(App *a, int action, const char *path)
     }
 }
 
-/* Saves, then runs the pending action if the save worked. */
+/* Saves; once the save worked, save_done runs the pending action. */
 static void save_then_pending(App *a, const char *path)
 {
-    if (do_save_path(a, path) == 0)
-        run_pending(a);
-    else
+    if (start_save(a, path) < 0)
         a->pending = P_NONE;
 }
 
@@ -586,7 +798,82 @@ static void do_save(App *a)
     if (!path)
         file_dialog(a, 1);
     else
-        do_save_path(a, path);
+        start_save(a, path);
+}
+
+/* Ends the save, and runs what waited for it if it worked. */
+static void save_done(App *a, int ok)
+{
+    Editor *ed = a->save_doc->views;
+    char info[64];
+
+    if (ok) {
+        ed_set_saved(ed, a->save_path);
+        detect_syntax(ed);
+        sprintf(info, " (%ld lines)", ed_lines(ed));
+        set_msg(a, "Saved ", ed_name(ed));
+        str_cat(a->msg, sizeof a->msg, info);
+    } else {
+        message_dialog(a, "Cannot save", a->save_path, buf_save_error(a->save));
+    }
+    buf_save_free(a->save);
+    a->save = NULL;
+    a->save_doc = NULL;
+    if (!ok) {
+        a->pending = P_NONE;
+        a->save_quit = 0;
+        return;
+    }
+    if (a->pending != P_NONE)
+        run_pending(a);
+    if (a->save_quit) {
+        a->save_quit = 0;
+        if (a->running && a->pending != P_QUIT)
+            guard(a, P_QUIT, NULL);
+    }
+}
+
+/* Runs buf_save_end, and wakes the main loop when it is done. Meanwhile
+ * the main loop only reads the document (see edit_blocked and guard). */
+static int save_thread(void *p)
+{
+    App *a = (App *)p;
+    SDL_Event e;
+    int r = buf_save_end(a->save);
+    SDL_AtomicSet(&a->save_ended, 1);
+    memset(&e, 0, sizeof e);
+    e.type = SDL_USEREVENT;
+    SDL_PushEvent(&e);
+    return r;
+}
+
+/* Works on the save until the time is up. When what is left is writing
+ * the file, that goes on save_thread. */
+static void save_steps(App *a, Uint64 end)
+{
+    int r = 1;
+
+    if (!a->save)
+        return;
+    if (a->save_thread) {
+        if (SDL_AtomicGet(&a->save_ended)) {
+            SDL_WaitThread(a->save_thread, &r);
+            a->save_thread = NULL;
+            save_done(a, r == 0);
+        }
+        return;
+    }
+    do
+        r = buf_save_step(a->save, SAVE_SLICE);
+    while (r > 0 && before(end));
+    if (r < 0) {
+        save_done(a, 0);
+    } else if (r == 0) {
+        SDL_AtomicSet(&a->save_ended, 0);
+        a->save_thread = SDL_CreateThread(save_thread, "cedit-save", a);
+        if (!a->save_thread)
+            save_done(a, buf_save_end(a->save) == 0);
+    }
 }
 
 /* A file size as ls -h shows it: "980", "4.2K", "17M". */
@@ -794,29 +1081,21 @@ static void file_accept(App *a)
     save_then_pending(a, path);
 }
 
+/* Searches for opt.find. In a big file the search goes on as a job;
+ * asking for the same search again meanwhile lets it go on. */
 static void do_find(App *a, int backward)
 {
-    Editor *ed = &a->win->ed;
-    int r, h;
-    long row, x;
     if (!a->opt.find[0]) {
         find_dialog(a, 0);
         return;
     }
-    finish_loading(a);
-    r = ed_find(ed, backward);
-    if (!r) {
-        set_msg(a, "Not found: ", a->opt.find);
+    if (a->job == J_FIND && spot_same(a) && a->search.backward == backward &&
+        a->search.icase == a->opt.icase && strcmp(a->search.pat, a->opt.find) == 0)
         return;
-    }
-    if (r == 2)
-        set_msg(a, backward ? "Search wrapped to the end" : "Search wrapped to the top", NULL);
-    /* keep matches in the upper part, above a find/replace dialog */
-    h = sync_view(a, a->win).h;
-    ed_scroll_to_cursor(ed);
-    ed_cursor_spot(ed, &row, &x);
-    if (row > h / 2)
-        ed_scroll_cursor_to(ed, h / 3);
+    if (!start_job(a, J_FIND))
+        return;
+    ed_find_begin(&a->win->ed, &a->search, backward);
+    job_steps(a, deadline(WORK_MS));
 }
 
 /* Acts on a dialog button (ID_CANCEL also stands for Escape). */
@@ -848,16 +1127,15 @@ static void dialog_button(App *a, int id)
         if (!a->opt.find[0])
             break;
         if (id == ID_REPLACE) {
-            finish_loading(a);
-            if (!ed_replace(&a->win->ed))
-                set_msg(a, "No more matches for ", a->opt.find);
+            if (may_edit(a)) {
+                ed_replace_selection(&a->win->ed);
+                do_find(a, 0);
+            }
         } else if (id == ID_REPLALL) {
-            char num[64];
-            long n;
-            finish_loading(a);
-            n = ed_replace_all(&a->win->ed);
-            sprintf(num, "Replaced %ld occurrence%s", n, n == 1 ? "" : "s");
-            set_msg(a, num, NULL);
+            if (may_edit(a) && start_job(a, J_REPLACE)) {
+                ed_replace_all_begin(&a->win->ed, &a->repl);
+                job_steps(a, deadline(WORK_MS));
+            }
         } else {
             do_find(a, 0);
         }
@@ -866,7 +1144,7 @@ static void dialog_button(App *a, int id)
         long n = atol(dlg_find(d, ID_LINE)->text);
         close_dialog(a);
         if (id == ID_OK && n > 0)
-            ed_goto(&a->win->ed, n);
+            move_loaded(a, J_GOTO, n, 0);
         break;
     }
     case DLG_CONFIRM:
@@ -901,13 +1179,16 @@ static void do_copy(App *a, int cut)
         return;
     SDL_SetClipboardText(t);
     free(t);
-    if (cut)
+    if (cut && may_edit(a))
         ed_cut(&a->win->ed);
 }
 
 static void do_paste(App *a)
 {
-    char *t = SDL_GetClipboardText();
+    char *t;
+    if (!may_edit(a))
+        return;
+    t = SDL_GetClipboardText();
     if (t && *t)
         ed_paste(&a->win->ed, t, strlen(t));
     SDL_free(t);
@@ -954,6 +1235,9 @@ static void follow_all(App *a)
 static int cmd_enabled(App *a, int cmd)
 {
     const Undo *u = &a->win->ed.doc->undo;
+    if ((cmd == CMD_UNDO || cmd == CMD_REDO || cmd == CMD_CUT || cmd == CMD_PASTE ||
+         cmd == CMD_DELETE) && edit_blocked(a))
+        return 0;
     switch (cmd) {
     case CMD_UNDO:
         return u->pos > 0;
@@ -1031,18 +1315,18 @@ static void command(App *a, int cmd)
     case CMD_SAVEAS:    file_dialog(a, 1); break;
     case CMD_EXIT:      guard(a, P_QUIT, NULL); break;
     case CMD_UNDO:
-        if (!ed_undo(ed))
+        if (may_edit(a) && !ed_undo(ed))
             set_msg(a, "Nothing to undo", NULL);
         break;
     case CMD_REDO:
-        if (!ed_redo(ed))
+        if (may_edit(a) && !ed_redo(ed))
             set_msg(a, "Nothing to redo", NULL);
         break;
     case CMD_CUT:       do_copy(a, 1); break;
     case CMD_COPY:      do_copy(a, 0); break;
     case CMD_PASTE:     do_paste(a); break;
-    case CMD_DELETE:    ed_delete(ed, 0, t); break;
-    case CMD_SELALL:    finish_loading(a); ed_select_all(ed); break;
+    case CMD_DELETE:    if (may_edit(a)) ed_delete(ed, 0, t); break;
+    case CMD_SELALL:    move_loaded(a, J_SELALL, 0, 0); break;
     case CMD_OVERWRITE: a->opt.overwrite = !a->opt.overwrite; break;
     case CMD_FIND:      find_dialog(a, 0); break;
     case CMD_FINDNEXT:  do_find(a, 0); break;
@@ -1257,7 +1541,7 @@ static void draw_window(App *a, Window *w)
     const Theme *th = a->theme;
     TextArea ta = sync_view(a, w);
     int focused = w == a->win;
-    int i, x, track, tpos, tlen, right = w->x + w->w - 1, bottom = w->y + w->h - 1;
+    int i, n, x, track, tpos, tlen, right = w->x + w->w - 1, bottom = w->y + w->h - 1;
     char title[300], pos[96], line[300];
 
     screen_fill(s, w->x, w->y, w->w, w->h, ' ', th->text_fg, th->text_bg);
@@ -1292,10 +1576,10 @@ static void draw_window(App *a, Window *w)
         str_cat(line, sizeof line, " ");
         screen_puts(s, w->x + 2, bottom, line, th->title_fg, th->title_bg, w->w - 4);
     } else {
-        /* the position on the right, and on the left what fits of the mode,
-         * line ends, encoding and loading progress */
-        const char *left[4];
-        char load[32];
+        /* the position on the right, and on the left what fits of the work
+         * going on, mode, line ends, encoding and loading progress */
+        const char *left[5];
+        char work[48], load[32];
         size_t len;
         const char *l = ed_line(ed, ed->cy, &len);
         long col = ed_disp_col(ed, l, len, ed->cx) + 1;
@@ -1307,16 +1591,26 @@ static void draw_window(App *a, Window *w)
             i = w->w - 4;
         end = right - 1 - i;
         screen_puts(s, end, bottom, pos, th->frame, th->text_bg, i);
-        left[0] = ed->opt->overwrite ? " OVR " : " INS ";
-        left[1] = ed->doc->buf->crlf ? " CRLF " : " LF ";
-        left[2] = " UTF-8 ";
-        left[3] = NULL;
+        n = 0;
+        if (a->save && a->save_doc == ed->doc) {
+            left[n++] = " Saving ";
+        } else if ((a->job == J_FIND || a->job == J_REPLACE) && a->job_win == w) {
+            sprintf(work, " %s %d%%, Esc stops ", a->job == J_FIND ? "Searching" : "Replacing",
+                    (int)(ed_search_progress(ed, a->job == J_FIND ? a->search.done
+                                                                  : a->repl.pos) * 100));
+            if (w->x + 2 + utf8_width(work) >= end)     /* the hint, if it fits */
+                strcpy(strchr(work, ','), " ");
+            left[n++] = work;
+        }
+        left[n++] = ed->opt->overwrite ? " OVR " : " INS ";
+        left[n++] = ed->doc->buf->crlf ? " CRLF " : " LF ";
+        left[n++] = " UTF-8 ";
         if (buf_loading(ed->doc->buf)) {
             sprintf(load, " Loading %d%% ", (int)(buf_load_progress(ed->doc->buf) * 100));
-            left[3] = load;
+            left[n++] = load;
         }
         /* each part and a border cell after it */
-        for (i = 0, x = w->x + 2; i < 4 && left[i] && x + utf8_width(left[i]) < end; i++)
+        for (i = 0, x = w->x + 2; i < n && x + utf8_width(left[i]) < end; i++)
             x += screen_puts(s, x, bottom, left[i], th->frame, th->text_bg,
                              utf8_width(left[i])) + 1;
     }
@@ -1639,22 +1933,32 @@ static void editor_key(App *a, const SDL_KeyboardEvent *k)
     case SDLK_HOME:     ed_move(ed, ctrl ? MV_DOCSTART : MV_HOME, shift); break;
     case SDLK_END:
         if (ctrl)
-            finish_loading(a);
-        ed_move(ed, ctrl ? MV_DOCEND : MV_END, shift);
+            move_loaded(a, J_DOCEND, 0, shift);
+        else
+            ed_move(ed, MV_END, shift);
         break;
     case SDLK_PAGEUP:   ed_move(ed, MV_PGUP, shift); break;
     case SDLK_PAGEDOWN: ed_move(ed, MV_PGDN, shift); break;
     case SDLK_RETURN:
-    case SDLK_KP_ENTER: ed_newline(ed, t); break;
-    case SDLK_BACKSPACE: ed_backspace(ed, ctrl, t); break;
+    case SDLK_KP_ENTER:
+        if (may_edit(a))
+            ed_newline(ed, t);
+        break;
+    case SDLK_BACKSPACE:
+        if (may_edit(a))
+            ed_backspace(ed, ctrl, t);
+        break;
     case SDLK_DELETE:
         if (shift)
             command(a, CMD_CUT);
-        else
+        else if (may_edit(a))
             ed_delete(ed, ctrl, t);
         break;
     case SDLK_INSERT:   command(a, shift ? CMD_PASTE : CMD_OVERWRITE); break;
-    case SDLK_TAB:      ed_tab(ed, shift, t); break;
+    case SDLK_TAB:
+        if (may_edit(a))
+            ed_tab(ed, shift, t);
+        break;
     case SDLK_ESCAPE:   ed_clear_selection(ed); break;
     case SDLK_F1:       command(a, CMD_HELP); break;
     case SDLK_F3:       command(a, shift ? CMD_FINDPREV : CMD_FINDNEXT); break;
@@ -1680,6 +1984,10 @@ static void key_down(App *a, const SDL_KeyboardEvent *k)
         return;
     }
     a->alt_tap = 0;
+    if (sym == SDLK_ESCAPE && a->job && a->menu.open < 0) {
+        stop_job(a, 1);
+        return;
+    }
     if (a->dlg.kind != DLG_NONE) {
         wake_cursor(a);
         if ((id = dlg_key(&a->dlg, k)) != ID_NONE)
@@ -1772,7 +2080,7 @@ void app_event(App *a, const SDL_Event *e)
         wake_cursor(a);
         if (a->dlg.kind != DLG_NONE)
             dlg_text(&a->dlg, e->text.text);
-        else if (a->menu.open < 0)  /* menus take letters as key presses */
+        else if (a->menu.open < 0 && may_edit(a))   /* menus take letters as key presses */
             ed_type(&a->win->ed, e->text.text, strlen(e->text.text), now_ms());
         break;
     case SDL_MOUSEBUTTONDOWN:
@@ -1805,23 +2113,23 @@ static long last_shown(App *a, Window *w)
 void app_tick(App *a)
 {
     unsigned long t = now_ms();
-    Uint64 end = SDL_GetPerformanceCounter() +
-                 SDL_GetPerformanceFrequency() * (a->input ? INPUT_MS : WORK_MS) / 1000;
+    Uint64 end = deadline(a->input ? INPUT_MS : WORK_MS);
     Window *w;
 
-    /* Loading and lexing go on in the background, a slice of time a frame
-     * (app_timeout has the main loop come back right away for the next):
-     * input waits for them at most that long, and the frame that shows it
-     * hardly at all. */
+    /* Loading, lexing, saving and jobs go on in the background, a slice of
+     * time a frame (app_timeout has the main loop come back right away for
+     * the next): input waits for them at most that long, and the frame
+     * that shows it hardly at all. */
     a->input = 0;
     for (w = win_first(a->root); w; w = win_next(w)) {
         Buffer *b = w->ed.doc->buf;
-        while (buf_loading(b) && SDL_GetPerformanceCounter() < end)
+        while (buf_loading(b) && before(end))
             buf_load_step(b, LOAD_SLICE);
-        while (a->highlight && hl_behind(doc_hl(&w->ed), last_shown(a, w)) &&
-               SDL_GetPerformanceCounter() < end)
+        while (a->highlight && hl_behind(doc_hl(&w->ed), last_shown(a, w)) && before(end))
             hl_fill(doc_hl(&w->ed), last_shown(a, w), LEX_SLICE);
     }
+    save_steps(a, end);
+    job_steps(a, end);
     if (t >= a->blink_next) {
         a->blink_on = !a->blink_on;
         a->blink_next = t + BLINK_MS;
@@ -1841,6 +2149,8 @@ int app_timeout(App *a)
     unsigned long clock_ms = (unsigned long)(60 - time(NULL) % 60) * 1000;
     Window *w;
 
+    if (a->job || (a->save && !a->save_thread))
+        return 0;
     for (w = win_first(a->root); w; w = win_next(w))
         if (buf_loading(w->ed.doc->buf) ||
             (a->highlight && hl_behind(doc_hl(&w->ed), last_shown(a, w))))
@@ -1897,6 +2207,9 @@ int app_init(App *a, int argc, char **argv)
 
 void app_quit(App *a)
 {
+    if (a->save_thread)
+        SDL_WaitThread(a->save_thread, NULL);
+    buf_save_free(a->save);
     dlg_close(&a->dlg);
     menu_list_clear(&a->menu);
     win_free(a->root);

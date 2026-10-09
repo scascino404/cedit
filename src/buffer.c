@@ -714,6 +714,7 @@ void buf_insert(Buffer *b, size_t off, const char *s, size_t n)
     if (!n)
         return;
     b->gen++;
+    b->changes++;
     if (off > b->root->bytes)
         off = b->root->bytes;
     leaf = find_leaf(b, -1, off, &l0, &o0);
@@ -756,6 +757,7 @@ void buf_delete(Buffer *b, size_t off, size_t n)
     if (n > b->root->bytes - off)
         n = b->root->bytes - off;
     b->gen++;
+    b->changes++;
     a = find_leaf(b, -1, off, &l0, &oa);
     mark_dirty(b, l0);
     z = find_leaf(b, -1, off + n - 1, &l0, &oz);
@@ -884,7 +886,6 @@ size_t buf_find(Buffer *b, size_t from, size_t to, const char *pat,
 
     if (!plen)
         return (size_t)-1;
-    buf_load_all(b);
     if (from > b->root->bytes)
         from = b->root->bytes;
     leaf = find_leaf(b, -1, from, &l0, &o0);
@@ -923,11 +924,82 @@ size_t buf_find(Buffer *b, size_t from, size_t to, const char *pat,
     return (size_t)-1;
 }
 
+/*
+ * Saving. The text goes to a temporary file in the same directory, which
+ * replaces the target when it is complete, so that a failed save leaves
+ * the file as it was. Where no file can be made there, the target is
+ * overwritten in place, after copying the leaves that borrow from the
+ * mapping of that very file.
+ */
+enum { SV_LOAD, SV_OWN, SV_WRITE, SV_OVER };
+
+struct BufSave {
+    Buffer *b;
+    char *target;
+    char *tmp;          /* NULL: overwriting target in place */
+    int fd;
+    int phase;          /* SV_* */
+    int ok;             /* the save ended well */
+    Node *leaf;         /* the next leaf to copy */
+    char err[256];
+};
+
+/* Records errno as the save's error and ends it. */
+static int save_fail(BufSave *s)
+{
+    str_copy(s->err, sizeof s->err, strerror(errno));
+    s->phase = SV_OVER;
+    return -1;
+}
+
+BufSave *buf_save_begin(Buffer *b, const char *path, char *err, size_t errlen)
+{
+    BufSave *s = (BufSave *)xmalloc(sizeof *s);
+    struct stat st;
+    char *slash;
+    size_t dlen;
+
+    memset(s, 0, sizeof *s);
+    s->b = b;
+    s->fd = -1;
+    s->target = realpath(path, NULL);
+    if (!s->target)
+        s->target = xstrdup(path);
+    slash = strrchr(s->target, '/');
+    dlen = slash ? (size_t)(slash - s->target) + 1 : 0;
+    s->tmp = (char *)xmalloc(strlen(s->target) + 32);
+    memcpy(s->tmp, s->target, dlen);
+    sprintf(s->tmp + dlen, ".%s.cedit-XXXXXX", s->target + dlen);
+    s->fd = mkstemp(s->tmp);
+    if (s->fd >= 0) {
+        mode_t mode;
+        if (stat(s->target, &st) == 0) {
+            mode = st.st_mode & 07777;
+        } else {
+            mode_t um = umask(0);
+            umask(um);
+            mode = 0666 & ~um;
+        }
+        fchmod(s->fd, mode);
+    } else {
+        free(s->tmp);
+        s->tmp = NULL;
+        /* in place: the target must be writable, but is opened (and
+         * truncated) only once the text no longer borrows from it */
+        if (access(s->target, W_OK) < 0 && errno != ENOENT) {
+            str_copy(err, errlen, strerror(errno));
+            buf_save_free(s);
+            return NULL;
+        }
+    }
+    s->phase = SV_LOAD;
+    return s;
+}
+
 /* Writes the leaves, many to a system call. */
-static int write_all(int fd, Buffer *b)
+static int write_all(int fd, Node *leaf)
 {
     struct iovec iov[256];
-    Node *leaf = first_leaf(b->root);
     int n, k;
 
     while (leaf) {
@@ -953,69 +1025,86 @@ static int write_all(int fd, Buffer *b)
     return 0;
 }
 
+int buf_save_step(BufSave *s, size_t budget)
+{
+    Buffer *b = s->b;
+    size_t done = 0;
+
+    if (s->phase == SV_LOAD) {
+        if (buf_load_step(b, budget))
+            return 1;
+        s->leaf = first_leaf(b->root);
+        s->phase = s->tmp ? SV_WRITE : SV_OWN;
+        return 1;
+    }
+    if (s->phase == SV_OWN) {
+        for (; s->leaf && done < budget; s->leaf = leaf_next(s->leaf))
+            if (s->leaf->cap == 0 && s->leaf->bytes) {
+                leaf_own(s->leaf, 0);
+                done += s->leaf->bytes;
+            }
+        if (s->leaf)
+            return 1;
+        s->fd = open(s->target, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (s->fd < 0)
+            return save_fail(s);
+        s->phase = SV_WRITE;
+        return 1;
+    }
+    return s->phase == SV_WRITE ? 0 : -1;
+}
+
+int buf_save_end(BufSave *s)
+{
+    int fd = s->fd, e;
+
+    s->fd = -1;
+    if (write_all(fd, first_leaf(s->b->root)) < 0 || (s->tmp && fsync(fd) < 0)) {
+        e = errno;
+        close(fd);
+        errno = e;
+        return save_fail(s);
+    }
+    if (close(fd) < 0 || (s->tmp && rename(s->tmp, s->target) < 0))
+        return save_fail(s);
+    s->phase = SV_OVER;
+    s->ok = 1;
+    return 0;
+}
+
+const char *buf_save_error(const BufSave *s)
+{
+    return s->err;
+}
+
+void buf_save_free(BufSave *s)
+{
+    if (!s)
+        return;
+    if (s->fd >= 0)
+        close(s->fd);
+    if (s->tmp && !s->ok)
+        unlink(s->tmp);
+    free(s->tmp);
+    free(s->target);
+    free(s);
+}
+
 int buf_save(Buffer *b, const char *path, char *err, size_t errlen)
 {
-    char *target, *tmp, *slash;
-    struct stat st;
-    int have_st, fd;
-    size_t dlen;
+    BufSave *s = buf_save_begin(b, path, err, errlen);
+    int r;
 
-    buf_load_all(b);
-    target = realpath(path, NULL);
-    if (!target)
-        target = xstrdup(path);
-    have_st = stat(target, &st) == 0;
-
-    /* 1. temp file in the same directory, then rename over the target */
-    slash = strrchr(target, '/');
-    dlen = slash ? (size_t)(slash - target) + 1 : 0;
-    tmp = (char *)xmalloc(strlen(target) + 32);
-    memcpy(tmp, target, dlen);
-    sprintf(tmp + dlen, ".%s.cedit-XXXXXX", target + dlen);
-    fd = mkstemp(tmp);
-    if (fd >= 0) {
-        mode_t mode;
-        if (have_st) {
-            mode = st.st_mode & 07777;
-        } else {
-            mode_t um = umask(0);
-            umask(um);
-            mode = 0666 & ~um;
-        }
-        fchmod(fd, mode);
-        if (write_all(fd, b) == 0 && fsync(fd) == 0 && close(fd) == 0 &&
-            rename(tmp, target) == 0) {
-            free(tmp);
-            free(target);
-            return 0;
-        }
-        str_copy(err, errlen, strerror(errno));
-        close(fd);
-        unlink(tmp);
-        free(tmp);
-        free(target);
+    if (!s)
         return -1;
-    }
-    free(tmp);
-
-    /* 2. no temp file possible: overwrite in place. Copy borrowed leaves
-     * first, since they may point into the very file we overwrite. */
-    {
-        Node *leaf;
-        for (leaf = first_leaf(b->root); leaf; leaf = leaf_next(leaf))
-            if (leaf->cap == 0 && leaf->bytes)
-                leaf_own(leaf, 0);
-    }
-    fd = open(target, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fd < 0 || write_all(fd, b) < 0 || close(fd) < 0) {
-        str_copy(err, errlen, strerror(errno));
-        if (fd >= 0)
-            close(fd);
-        free(target);
-        return -1;
-    }
-    free(target);
-    return 0;
+    while ((r = buf_save_step(s, (size_t)1 << 30)) > 0)
+        ;
+    if (r == 0)
+        r = buf_save_end(s);
+    if (r < 0)
+        str_copy(err, errlen, s->err);
+    buf_save_free(s);
+    return r;
 }
 
 static int check_node(Buffer *b, Node *n, Node *parent, int *depth, int d)

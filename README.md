@@ -15,7 +15,8 @@ and fonts and mouse pointers drawn by hand.
 - **Fast on huge files:** files are memory-mapped and indexed in the
   background. The first screen of a 1 GB file shows up in under a
   millisecond, the whole file is indexed in about 0.1 s, and editing stays
-  instant.
+  instant. Searching, Replace All and saving go on in the background a
+  slice at a time, so the editor never stops answering.
 - **C89 + SDL2** and nothing else.
 
 ## Build
@@ -25,7 +26,7 @@ development files (`sdl2-config` must be on your `PATH`).
 
 ```sh
 make -j         # builds build/cedit
-make check      # builds and runs the buffer/undo/editor/syntax tests in build/
+make check      # builds and runs the buffer/undo/editor/syntax/UI tests in build/
 make tools      # builds the review tools (build/fontsheet, build/uishot)
 make bench      # runs the benchmarks in tests/bench.c (about 1.5 min; makes
                 #   1.3 GB of test files in build/bench-data on first use)
@@ -102,6 +103,7 @@ Settings are changed from the menus and remembered across sessions in
 | `Ins` | Toggle insert / overwrite mode (hollow red cursor) |
 | `Ctrl+F`, `F3` / `Shift+F3` | Find, next / previous match |
 | `Ctrl+H` | Replace (one at a time, or all at once) |
+| `Esc` | Stop a search or Replace All that is still going on (in a big file; the bottom border shows its progress) |
 | `Ctrl+G` | Go to line |
 | `Ctrl+-` / `Ctrl+=`, `Ctrl+wheel` | Smaller / larger text |
 | `Ctrl+0` | Default (medium) text |

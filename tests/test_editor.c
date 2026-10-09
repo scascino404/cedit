@@ -5,6 +5,7 @@
 #define _XOPEN_SOURCE 700
 #include "../src/editor.h"
 #include "../src/utf8.h"
+#include "../src/util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -145,6 +146,167 @@ static void check_rows(Editor *ed, long ln, int line)
             return;
         }
     }
+}
+
+/* A file of short lines of a few letters (many near misses), 3 MB, so
+ * that it loads in steps. */
+static char *slice_text(size_t *n)
+{
+    size_t i;
+    unsigned long r = 7;
+    char *t;
+    *n = (size_t)3 << 20;
+    t = (char *)malloc(*n + 1);
+    for (i = 0; i < *n; i++) {
+        r = (r * 1103515245UL + 12345UL) & 0xffffffffUL;
+        t[i] = (r >> 8) % 9 == 0 ? '\n' : "abcAB"[(r >> 12) % 5];
+    }
+    t[*n] = 0;
+    return t;
+}
+
+/* Opens text as a file that is still loading. */
+static void open_loading(Editor *ed, const char *text, size_t n)
+{
+    char path[] = "/tmp/cedit-ed-XXXXXX";
+    int fd = mkstemp(path);
+    char err[128];
+    if (write(fd, text, n) != (ssize_t)n)
+        printf("write failed\n");
+    close(fd);
+    ed_open(ed, path, err, sizeof err);
+    unlink(path);
+}
+
+static int at(const char *t, size_t i, const char *pat, size_t plen, int icase)
+{
+    size_t k;
+    for (k = 0; k < plen; k++) {
+        int a = (unsigned char)t[i + k], b = (unsigned char)pat[k];
+        if (icase && a >= 'A' && a <= 'Z')
+            a += 32;
+        if (icase && b >= 'A' && b <= 'Z')
+            b += 32;
+        if (a != b)
+            return 0;
+    }
+    return 1;
+}
+
+/* Searching a slice at a time, with slices of a few bytes, while the file
+ * is loading, finds what a plain scan of the text does. */
+static void test_find_slices(Editor *ed, EdOptions *opt)
+{
+    static const char *const pats[] = {"ab", "Ab", "bca", "a", "cAB", "abcab", "BB"};
+    unsigned long r = 99;
+    size_t n, i;
+    char *t = slice_text(&n);
+    int k;
+
+    for (k = 0; k < 120; k++) {
+        const char *pat;
+        size_t plen, start, want = (size_t)-1, got;
+        int back, icase, res, wrapped = 0, want_res;
+        long ln;
+        EdSearch s;
+
+        r = (r * 1103515245UL + 12345UL) & 0xffffffffUL;
+        pat = pats[(r >> 8) % 7];
+        plen = strlen(pat);
+        back = (r >> 12) & 1;
+        icase = (r >> 13) & 1;
+        open_loading(ed, t, n);
+        CHECK(buf_loading(ed->doc->buf));
+        /* start in the part loaded so far */
+        ln = (long)((r >> 14) % (unsigned long)(ed_lines(ed) - 1));
+        ed_set_cursor(ed, ln, (r >> 4) % 3, 0);
+        start = buf_line_offset(ed->doc->buf, ed->cy) + ed->cx;
+        if (!back) {
+            for (i = start; i + plen <= n && want == (size_t)-1; i++)
+                if (at(t, i, pat, plen, icase))
+                    want = i;
+            for (i = 0; i < start && want == (size_t)-1; i++)
+                if (at(t, i, pat, plen, icase))
+                    want = i, wrapped = 1;
+        } else {
+            for (i = start; i-- > 0 && want == (size_t)-1;)
+                if (i + plen <= n && at(t, i, pat, plen, icase))
+                    want = i;
+            for (i = n; i-- > start && want == (size_t)-1;)
+                if (i + plen <= n && at(t, i, pat, plen, icase))
+                    want = i, wrapped = 1;
+        }
+        want_res = want == (size_t)-1 ? 0 : wrapped ? 2 : 1;
+        str_copy(opt->find, sizeof opt->find, pat);
+        opt->icase = icase;
+        ed_find_begin(ed, &s, back);
+        do {
+            r = (r * 1103515245UL + 12345UL) & 0xffffffffUL;
+            res = ed_find_step(ed, &s, 1 + (r >> 8) % 40000);
+        } while (res < 0);
+        got = ed->sel ? buf_line_offset(ed->doc->buf, ed->ay) + ed->ax : (size_t)-1;
+        if (res != want_res || got != want) {
+            printf("FAIL find \"%s\" icase %d back %d from %lu: %d at %ld, want %d at %ld\n",
+                   pat, icase, back, (unsigned long)start, res, (long)got, want_res,
+                   (long)want);
+            failures++;
+        }
+    }
+    free(t);
+}
+
+/* Replace All a slice at a time, while the file is loading, replaces what
+ * a plain scan does, as one undo step. */
+static void test_replace_slices(Editor *ed, EdOptions *opt)
+{
+    static const char *const pats[] = {"ab", "bA", "cab", "a"};
+    static const char *const repls[] = {"", "ab", "xyzab", "B\nb"};
+    unsigned long r = 5;
+    size_t n, i, m;
+    char *t = slice_text(&n), *want, *got;
+    int k;
+
+    want = (char *)malloc(n * 3 + 1);
+    for (k = 0; k < 8; k++) {
+        const char *pat = pats[k % 4], *repl = repls[(k / 2) % 4];
+        size_t plen = strlen(pat), rlen = strlen(repl);
+        long count = 0;
+        EdReplace rp;
+        int icase = k & 1;
+
+        for (i = m = 0; i < n;) {
+            if (i + plen <= n && at(t, i, pat, plen, icase)) {
+                memcpy(want + m, repl, rlen);
+                m += rlen;
+                i += plen;
+                count++;
+            } else {
+                want[m++] = t[i++];
+            }
+        }
+        want[m] = 0;
+        open_loading(ed, t, n);
+        str_copy(opt->find, sizeof opt->find, pat);
+        str_copy(opt->repl, sizeof opt->repl, repl);
+        opt->icase = icase;
+        ed_replace_all_begin(ed, &rp);
+        do
+            r = (r * 1103515245UL + 12345UL) & 0xffffffffUL;
+        while (ed_replace_all_step(ed, &rp, 1 + (r >> 8) % 60000));
+        got = contents(ed);
+        if (rp.count != count || strcmp(got, want) != 0) {
+            printf("FAIL replace \"%s\" by \"%s\" icase %d: %ld, want %ld%s\n", pat, repl,
+                   icase, rp.count, count, strcmp(got, want) ? ", text differs" : "");
+            failures++;
+        }
+        free(got);
+        ed_undo(ed);
+        got = contents(ed);
+        CHECK(strcmp(got, t) == 0 && !ed_modified(ed));
+        free(got);
+    }
+    free(want);
+    free(t);
 }
 
 int main(void)
@@ -423,6 +585,9 @@ int main(void)
     CHECK(v2.doc != ed.doc && ed_views(&ed) == 1 && ed_views(&v2) == 1);
     EXPECT(&ed, "azero\none\ntwo\nthree\n");
     ed_free(&v2);
+
+    test_find_slices(&ed, &opt);
+    test_replace_slices(&ed, &opt);
 
     ed_free(&ed);
     if (failures) {

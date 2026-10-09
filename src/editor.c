@@ -175,16 +175,20 @@ int ed_open(Editor *ed, const char *path, char *err, size_t errlen)
 
 int ed_save(Editor *ed, const char *path, char *err, size_t errlen)
 {
-    Doc *d = ed->doc;
-    char *p;
-    if (buf_save(d->buf, path, err, errlen) < 0)
+    if (buf_save(ed->doc->buf, path, err, errlen) < 0)
         return -1;
+    ed_set_saved(ed, path);
+    return 0;
+}
+
+void ed_set_saved(Editor *ed, const char *path)
+{
+    Doc *d = ed->doc;
+    char *p = xstrdup(path);    /* path may be d->path itself */
     undo_mark_saved(&d->undo);
     d->last_kind = K_NONE;
-    p = xstrdup(path);          /* path may be d->path itself */
     free(d->path);
     d->path = p;
-    return 0;
 }
 
 int ed_modified(const Editor *ed)
@@ -1229,84 +1233,251 @@ static void select_range(Editor *ed, size_t a, size_t b)
     ed->follow = 1;
 }
 
-int ed_find(Editor *ed, int backward)
+/* Loads about bytes more of a file that is being loaded, for a search
+ * that got to the end of the loaded part. Returns how much it loaded. */
+static size_t load_more(Buffer *b, size_t bytes)
 {
-    size_t plen = strlen(ed->opt->find), from, m, none = (size_t)-1;
+    size_t before = b->load_pos;
+    buf_load_step(b, bytes);
+    return b->load_pos - before;
+}
+
+/* bytes less n, or 0. */
+static size_t less(size_t bytes, size_t n)
+{
+    return n < bytes ? bytes - n : 0;
+}
+
+void ed_find_begin(Editor *ed, EdSearch *s, int backward)
+{
     long sy, ey;
     size_t sx, ex;
-    int have = ed_sel_range(ed, &sy, &sx, &ey, &ex), wrapped = 0;
+    int have = ed_sel_range(ed, &sy, &sx, &ey, &ex);
 
-    if (!plen)
-        return 0;
-    /* after wrapping, only the part the first pass did not search */
-    if (!backward) {
-        from = have ? pos_off(ed, ey, ex) : cur_off(ed);
-        m = buf_find(ed->doc->buf, from, none, ed->opt->find, plen, ed->opt->icase, 0);
-        if (m == none) {
-            m = buf_find(ed->doc->buf, 0, from, ed->opt->find, plen, ed->opt->icase, 0);
-            wrapped = 1;
+    memset(s, 0, sizeof *s);
+    str_copy(s->pat, sizeof s->pat, ed->opt->find);
+    s->plen = strlen(s->pat);
+    s->icase = ed->opt->icase;
+    s->backward = backward;
+    /* forward from the end of the selection, backward from its start */
+    if (!backward)
+        s->start = have ? pos_off(ed, ey, ex) : cur_off(ed);
+    else
+        s->start = have ? pos_off(ed, sy, sx) : cur_off(ed);
+    s->pos = s->start;
+    s->pass = s->plen ? 0 : 2;
+}
+
+/* Ends a search with the match at m. */
+static int found(Editor *ed, EdSearch *s, size_t m)
+{
+    int r = s->pass ? 2 : 1;
+    s->pass = 2;
+    select_range(ed, m, m + s->plen);
+    return r;
+}
+
+/* Forward: the first pass searches [start, end of file), the second, after
+ * wrapping, [0, start). */
+static int find_fwd(Editor *ed, EdSearch *s, size_t bytes)
+{
+    Buffer *b = ed->doc->buf;
+    size_t m, n;
+
+    while (bytes) {
+        size_t end = s->pass ? s->start : buf_size(b);
+        if (s->pos >= end) {
+            if (!s->pass && buf_loading(b)) {
+                /* a match cut off by the end of the loaded part may go on
+                 * in what loads next */
+                n = s->pos - s->start;
+                s->pos -= n < s->plen - 1 ? n : s->plen - 1;
+                bytes = less(bytes, load_more(b, bytes));
+                continue;
+            }
+            if (s->pass) {
+                s->pass = 2;
+                return 0;
+            }
+            s->pass = 1;
+            s->pos = 0;
+            continue;
         }
-    } else {
-        from = have ? pos_off(ed, sy, sx) : cur_off(ed);
-        m = from ? buf_find(ed->doc->buf, from - 1, 0, ed->opt->find, plen, ed->opt->icase, 1) : none;
-        if (m == none) {
-            m = buf_find(ed->doc->buf, buf_size(ed->doc->buf), from, ed->opt->find, plen,
-                         ed->opt->icase, 1);
-            wrapped = 1;
-        }
+        n = end - s->pos < bytes ? end - s->pos : bytes;
+        m = buf_find(b, s->pos, s->pos + n, s->pat, s->plen, s->icase, 0);
+        s->pos += n;
+        s->done += n;
+        bytes -= n;
+        if (m != (size_t)-1)
+            return found(ed, s, m);
     }
-    if (m == none)
+    return -1;
+}
+
+/* Backward: the first pass searches down from start to 0, the second, after
+ * wrapping, from the end of the file down to start. pos is the end of the
+ * part left to search ((size_t)-1 before the second pass knows it). */
+static int find_bwd(Editor *ed, EdSearch *s, size_t bytes)
+{
+    Buffer *b = ed->doc->buf;
+    size_t m, n;
+
+    while (bytes) {
+        size_t low = s->pass ? s->start : 0;
+        if (s->pos == (size_t)-1) {
+            if (buf_loading(b)) {
+                bytes = less(bytes, load_more(b, bytes));
+                continue;
+            }
+            s->pos = buf_size(b);
+        }
+        if (s->pos <= low) {
+            if (s->pass) {
+                s->pass = 2;
+                return 0;
+            }
+            s->pass = 1;
+            s->pos = (size_t)-1;
+            continue;
+        }
+        n = s->pos - low < bytes ? s->pos - low : bytes;
+        m = buf_find(b, s->pos - 1, s->pos - n, s->pat, s->plen, s->icase, 1);
+        s->pos -= n;
+        s->done += n;
+        bytes -= n;
+        if (m != (size_t)-1)
+            return found(ed, s, m);
+    }
+    return -1;
+}
+
+int ed_find_step(Editor *ed, EdSearch *s, size_t bytes)
+{
+    if (s->pass == 2)
         return 0;
-    select_range(ed, m, m + plen);
-    return wrapped ? 2 : 1;
+    return s->backward ? find_bwd(ed, s, bytes) : find_fwd(ed, s, bytes);
+}
+
+int ed_find(Editor *ed, int backward)
+{
+    EdSearch s;
+    ed_find_begin(ed, &s, backward);
+    return ed_find_step(ed, &s, (size_t)-1);
+}
+
+int ed_replace_selection(Editor *ed)
+{
+    long sy, ey;
+    size_t sx, ex, plen = strlen(ed->opt->find), rlen = strlen(ed->opt->repl);
+    size_t a, b;
+    char *t;
+    int same;
+
+    if (!ed_sel_range(ed, &sy, &sx, &ey, &ex))
+        return 0;
+    a = pos_off(ed, sy, sx);
+    b = pos_off(ed, ey, ex);
+    if (b - a != plen)
+        return 0;
+    t = (char *)xmalloc(plen);
+    buf_copy(ed->doc->buf, a, plen, t);
+    same = mem_match(t, ed->opt->find, plen, ed->opt->icase);
+    free(t);
+    if (!same)
+        return 0;
+    group(ed, K_OTHER, 0, 0);
+    del(ed, a, plen, cur_off(ed));
+    ins(ed, a, ed->opt->repl, rlen, a);
+    off_pos(ed, a + rlen, &ed->cy, &ed->cx);
+    ed->sel = 0;
+    after_edit(ed);
+    return 1;
 }
 
 int ed_replace(Editor *ed)
 {
-    long sy, ey;
-    size_t sx, ex, plen = strlen(ed->opt->find), rlen = strlen(ed->opt->repl);
-
     /* replace the selection if it is a match, then find the next one */
-    if (ed_sel_range(ed, &sy, &sx, &ey, &ex)) {
-        size_t a = pos_off(ed, sy, sx), b = pos_off(ed, ey, ex);
-        int same = b - a == plen;
-        if (same) {
-            char *t = (char *)xmalloc(plen);
-            buf_copy(ed->doc->buf, a, plen, t);
-            same = mem_match(t, ed->opt->find, plen, ed->opt->icase);
-            free(t);
-        }
-        if (same) {
-            group(ed, K_OTHER, 0, 0);
-            del(ed, a, plen, cur_off(ed));
-            ins(ed, a, ed->opt->repl, rlen, a);
-            off_pos(ed, a + rlen, &ed->cy, &ed->cx);
-            ed->sel = 0;
-            after_edit(ed);
-        }
-    }
+    ed_replace_selection(ed);
     return ed_find(ed, 0);
+}
+
+/* A replacement costs about as much time as searching this many bytes. */
+#define REPLACE_COST 4096
+
+void ed_replace_all_begin(Editor *ed, EdReplace *r)
+{
+    memset(r, 0, sizeof *r);
+    str_copy(r->pat, sizeof r->pat, ed->opt->find);
+    str_copy(r->repl, sizeof r->repl, ed->opt->repl);
+    r->plen = strlen(r->pat);
+    r->rlen = strlen(r->repl);
+    r->icase = ed->opt->icase;
+    r->cur = cur_off(ed);
+    r->over = !r->plen;
+    if (!r->over) {
+        group(ed, K_OTHER, 0, 0);
+        ed->sel = 0;
+    }
+}
+
+int ed_replace_all_step(Editor *ed, EdReplace *r, size_t bytes)
+{
+    Buffer *b = ed->doc->buf;
+    size_t m, n;
+
+    if (r->over)
+        return 0;
+    views_save(ed);
+    while (bytes) {
+        size_t size = buf_size(b);
+        if (r->pos >= size) {
+            if (!buf_loading(b)) {
+                r->over = 1;
+                break;
+            }
+            /* as in find_fwd, but not into a replacement */
+            n = r->pos - r->mark;
+            r->pos -= n < r->plen - 1 ? n : r->plen - 1;
+            bytes = less(bytes, load_more(b, bytes));
+            continue;
+        }
+        n = size - r->pos < bytes ? size - r->pos : bytes;
+        m = buf_find(b, r->pos, r->pos + n, r->pat, r->plen, r->icase, 0);
+        if (m == (size_t)-1) {
+            r->pos += n;
+            bytes -= n;
+            continue;
+        }
+        bytes = less(bytes, m + r->plen - r->pos + REPLACE_COST);
+        del(ed, m, r->plen, r->cur);
+        ins(ed, m, r->repl, r->rlen, r->cur);
+        r->pos = r->mark = m + r->rlen;
+        r->count++;
+    }
+    if (r->over) {
+        ed->sel = 0;
+        after_edit(ed);
+    } else {
+        clamp(ed);
+        views_restore(ed);
+    }
+    return !r->over;
 }
 
 long ed_replace_all(Editor *ed)
 {
-    size_t plen = strlen(ed->opt->find), rlen = strlen(ed->opt->repl), off = 0, m;
-    size_t cur = cur_off(ed);
-    long count = 0;
+    EdReplace r;
+    ed_replace_all_begin(ed, &r);
+    while (ed_replace_all_step(ed, &r, (size_t)-1))
+        ;
+    return r.count;
+}
 
-    if (!plen)
-        return 0;
-    group(ed, K_OTHER, 0, 0);
-    while ((m = buf_find(ed->doc->buf, off, (size_t)-1, ed->opt->find, plen,
-                         ed->opt->icase, 0)) != (size_t)-1) {
-        del(ed, m, plen, cur);
-        ins(ed, m, ed->opt->repl, rlen, cur);
-        off = m + rlen;
-        count++;
-    }
-    ed->sel = 0;
-    after_edit(ed);
-    return count;
+double ed_search_progress(Editor *ed, size_t done)
+{
+    Buffer *b = ed->doc->buf;
+    double total = (double)buf_size(b) + (double)(b->map_len - b->load_pos);
+    return total > 0 && done < total ? done / total : 1.0;
 }
 
 void ed_goto(Editor *ed, long line)
