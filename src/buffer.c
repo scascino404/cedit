@@ -35,7 +35,7 @@ struct Node {
 
 /* Counts '\n' bytes. The inner loop over 128-byte blocks with a byte-wide
  * accumulator is shaped so that both gcc and clang vectorize it (about
- * 20 ms per GB, 5-12x faster than the naive loop; see README.md). */
+ * 20 ms per GB, 5-12x faster than the naive loop). */
 static long count_nl(const char *s, size_t n)
 {
     const unsigned char *p = (const unsigned char *)s;

@@ -73,7 +73,7 @@ static const MenuItem m_window[] = {
 };
 static const MenuItem m_help[] = {
     {"&Keyboard...", "F1", CMD_HELP},
-    {"&About cedit...", "", CMD_ABOUT}
+    {"&About...", "", CMD_ABOUT}
 };
 static const MenuItem m_context[] = {
     {"&Undo", "Ctrl+Z", CMD_UNDO},

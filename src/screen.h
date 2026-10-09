@@ -63,6 +63,11 @@ typedef struct Screen {
     SDL_Texture *ptr_tex;
     int ptr_w, ptr_h, ptr_hx, ptr_hy;
     int win_w, win_h, out_w, out_h;
+
+    /* The picture last drawn (see screen_picture), at pixel pic_x, pic_y
+     * of the grid. */
+    unsigned char *pic;
+    int pic_x, pic_y, pic_w, pic_h;
 } Screen;
 
 int screen_init(Screen *s, int size);
@@ -106,6 +111,17 @@ int screen_label(Screen *s, int x, int y, const char *label, int fg, int hot,
 int label_width(const char *label);
 /* The lowercase hotkey letter of a label, or 0. */
 int label_hotkey(const char *label);
+
+/*
+ * Draws a picture of w x h palette colors (PIC_CLEAR where the cell
+ * background shows) with its top-left corner at pixel x, y of the grid, one
+ * font pixel per picture pixel, over the cells it covers. Like the cells, it
+ * has to be drawn again for each frame, after them; there is room for one
+ * picture in a frame.
+ */
+#define PIC_CLEAR 255
+void screen_picture(Screen *s, int x, int y, int w, int h,
+                    const unsigned char *px);
 
 /* Moves the self-drawn pointer (window coordinates) or hides it. */
 void screen_pointer(Screen *s, int wx, int wy, int visible);

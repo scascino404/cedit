@@ -89,6 +89,7 @@ void screen_quit(Screen *s)
     free(s->fb);
     free(s->cells);
     free(s->prev);
+    free(s->pic);
 }
 
 void screen_layout(Screen *s)
@@ -292,6 +293,55 @@ int label_hotkey(const char *label)
     return p ? ascii_lower((unsigned char)p[1]) : 0;
 }
 
+/* Cells under the picture hold this, beyond the last codepoint. */
+#define PIC_CELL 0x110000ul
+
+void screen_picture(Screen *s, int x, int y, int w, int h,
+                    const unsigned char *px)
+{
+    size_t n = (size_t)w * h;
+    int cx, cy;
+
+    if (w <= 0 || h <= 0)
+        return;
+    /* a picture moved or changed has to be drawn over all its cells, even
+     * the ones that showed it before */
+    if (!s->pic || x != s->pic_x || y != s->pic_y || w != s->pic_w ||
+        h != s->pic_h || memcmp(px, s->pic, n) != 0) {
+        free(s->pic);
+        s->pic = (unsigned char *)xmalloc(n);
+        memcpy(s->pic, px, n);
+        s->pic_x = x;
+        s->pic_y = y;
+        s->pic_w = w;
+        s->pic_h = h;
+        s->full = 1;
+    }
+    for (cy = y / s->ch; cy <= (y + h - 1) / s->ch; cy++)
+        for (cx = x / s->cw; cx <= (x + w - 1) / s->cw; cx++)
+            if (cx >= 0 && cy >= 0 && cx < s->cols && cy < s->rows)
+                s->cells[cy * s->cols + cx].ch = PIC_CELL;
+}
+
+/* A cell under the picture: its part of the picture, on the cell's
+ * background. */
+static void raster_picture(Screen *s, int cx, int cy, const Cell *c)
+{
+    Uint32 bg = palette[c->bg & 15];
+    Uint32 *row = s->fb + (size_t)cy * s->ch * s->fb_w + (size_t)cx * s->cw;
+    int x, y;
+
+    for (y = 0; y < s->ch; y++, row += s->fb_w) {
+        int py = cy * s->ch + y - s->pic_y;
+        for (x = 0; x < s->cw; x++) {
+            int px = cx * s->cw + x - s->pic_x;
+            int p = px >= 0 && py >= 0 && px < s->pic_w && py < s->pic_h
+                        ? s->pic[py * s->pic_w + px] : PIC_CLEAR;
+            row[x] = p == PIC_CLEAR ? bg : palette[p & 15];
+        }
+    }
+}
+
 static void raster(Screen *s, int cx, int cy, const Cell *c)
 {
     const unsigned long *g = font_glyph(s->font, c->ch);
@@ -341,7 +391,10 @@ void screen_present(Screen *s)
             Cell *p = &s->prev[y * s->cols + x];
             if (s->full || c->ch != p->ch || c->fg != p->fg || c->bg != p->bg ||
                 c->cur != p->cur) {
-                raster(s, x, y, c);
+                if (c->ch == PIC_CELL)
+                    raster_picture(s, x, y, c);
+                else
+                    raster(s, x, y, c);
                 *p = *c;
                 if (y < y0)
                     y0 = y;

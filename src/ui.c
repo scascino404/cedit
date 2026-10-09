@@ -9,6 +9,7 @@
 #define _XOPEN_SOURCE 700
 #include "ui.h"
 #include "config.h"
+#include "logo.h"
 #include "path.h"
 #include "utf8.h"
 #include "util.h"
@@ -34,7 +35,7 @@ enum { P_NONE, P_QUIT, P_NEW, P_OPEN, P_OPEN_PATH, P_CLOSE };
 
 enum {
     DLG_OPEN = DLG_NONE + 1, DLG_SAVEAS, DLG_FIND, DLG_REPLACE, DLG_GOTO,
-    DLG_CONFIRM, DLG_MESSAGE, DLG_HELP
+    DLG_CONFIRM, DLG_MESSAGE, DLG_HELP, DLG_ABOUT
 };
 
 enum {
@@ -485,6 +486,35 @@ static void message_dialog(App *a, const char *title, const char *l1,
         dlg_add(d, W_LABEL, ID_NONE, 3, 3, w - 6, l2);
     dlg_buttons(d, d->h - 3, ids, labels, 1);
     d->def_id = ID_OK;
+}
+
+/* The rows the logo takes at the top of the About box, at the 8 px font's
+ * cells (it takes fewer of the 12 px font's, and is centered in them). */
+#define LOGO_ROWS ((LOGO_H + 7) / 8)
+
+static void about_dialog(App *a)
+{
+    static const char line[] = "Classic Text Editor";
+    static const int ids[] = {ID_OK};
+    static const char *const labels[] = {"OK"};
+    Dialog *d = &a->dlg;
+    int n = utf8_width(line), w = n + 12;
+
+    dlg_begin(d, DLG_ABOUT, "About", w, 2 + LOGO_ROWS + 1 + 1 + 4);
+    dlg_add(d, W_LABEL, ID_NONE, (w - n) / 2, 2 + LOGO_ROWS + 1, n, line);
+    dlg_buttons(d, d->h - 3, ids, labels, 1);
+    d->def_id = ID_OK;
+}
+
+static void draw_logo(App *a)
+{
+    Screen *s = &a->scr;
+    Dialog *d = &a->dlg;
+    unsigned char px[LOGO_W * LOGO_H];
+    logo_pixels(px);
+    screen_picture(s, d->x * s->cw + (d->w * s->cw - LOGO_W) / 2,
+                   (d->y + 2) * s->ch + (LOGO_ROWS * s->ch - LOGO_H) / 2,
+                   LOGO_W, LOGO_H, px);
 }
 
 static void help_dialog(App *a)
@@ -1274,10 +1304,7 @@ static void command(App *a, int cmd)
         focus(a, w ? w : win_last(a->root));
         break;
     case CMD_HELP:      help_dialog(a); break;
-    case CMD_ABOUT:
-        message_dialog(a, "About", "cedit 0.1 - Classic Text Editor",
-                       "C89 + SDL2. Hand-drawn fonts. Public domain spirit.");
-        break;
+    case CMD_ABOUT:     about_dialog(a); break;
     }
 }
 
@@ -1517,6 +1544,8 @@ void app_draw(App *a)
     menu_draw(&a->menu, &a->scr, a->theme, cmd_state, a);
     draw_clock(a);
     dlg_draw(&a->dlg, &a->scr, a->theme, a->blink_on);
+    if (a->dlg.kind == DLG_ABOUT)
+        draw_logo(a);
     update_title(a);
     screen_present(&a->scr);
 }
