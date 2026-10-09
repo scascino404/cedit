@@ -32,6 +32,8 @@ It borrows from two places:
 
 ## Build
 
+### Linux / Mac OS
+
 You need a C compiler, CMake 3.27 or newer, Ninja, and the SDL2 development
 files:
 
@@ -61,7 +63,7 @@ The preset builds with clang and Ninja. To use gcc, configure with
 
 You need [Visual Studio](https://visualstudio.microsoft.com/) 2022 or
 later (Community, or just the Build Tools) with the **Desktop development
-with C++** workload. Nothing else: the build downloads SDL2 by itself.
+with C++** workload. (The build downloads SDL2 by itself.)
 
 Either open the cedit folder in Visual Studio and build, or run these in a
 **Developer PowerShell for VS**:
