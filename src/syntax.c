@@ -466,6 +466,7 @@ static unsigned run(Highlight *h, long *ln, long to, unsigned st, int exact,
                     size_t budget)
 {
     size_t done = 0, len;
+    const char *s;
 
     for (;;) {
         if (exact && *ln % HL_STEP == 0 && *ln / HL_STEP == h->nckpt) {
@@ -478,7 +479,8 @@ static unsigned run(Highlight *h, long *ln, long to, unsigned st, int exact,
         }
         if (*ln >= to || done >= budget)
             return st;
-        st = syn_lex(h->syn, st, buf_line(h->buf, *ln, &len), len, NULL);
+        s = buf_line(h->buf, *ln, &len);
+        st = syn_lex(h->syn, st, s, len, NULL);
         done += len + 1;
         ++*ln;
     }

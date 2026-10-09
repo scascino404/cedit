@@ -195,15 +195,17 @@ static void compare(Highlight *h, Buffer *b, long ln, const char *what)
 {
     unsigned char want[4096];
     const unsigned char *got;
+    const char *s;
     unsigned st = 0;
     size_t len;
     long k;
 
     for (k = 0; k < ln; k++) {
-        const char *s = buf_line(b, k, &len);
+        s = buf_line(b, k, &len);
         st = syn_lex(h->syn, st, s, len, NULL);
     }
-    syn_lex(h->syn, st, buf_line(b, ln, &len), len, want);
+    s = buf_line(b, ln, &len);
+    syn_lex(h->syn, st, s, len, want);
     got = hl_line(h, ln);
     if (len > sizeof want || memcmp(got, want, len) != 0) {
         printf("FAIL cache (%s): line %ld differs\n", what, ln);

@@ -752,6 +752,7 @@ static void lex_file(const char *name, const char *label)
     int is_new;
     long ln, n;
     size_t len;
+    const char *line1;
     double t, mb;
 
     path_of(path, name);
@@ -762,7 +763,8 @@ static void lex_file(const char *name, const char *label)
     buf_load_all(b);
     mb = buf_size(b) / MB;
     hl_init(&h);
-    hl_set(&h, b, syn_detect(name, buf_line(b, 0, &len), len));
+    line1 = buf_line(b, 0, &len);
+    hl_set(&h, b, syn_detect(name, line1, len));
     t = now();
     while (hl_behind(&h, buf_lines(b) - 1))
         hl_fill(&h, buf_lines(b) - 1, (size_t)1 << 30);
