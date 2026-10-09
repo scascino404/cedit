@@ -2,6 +2,7 @@
  * font.c - builds the glyph tables from the hand-drawn sources.
  */
 #include "font.h"
+#include "util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -226,8 +227,8 @@ static void make_blocks(Font *f)
  * font provides them. */
 static void make_accented(Font *f)
 {
-    size_t i;
-    for (i = 0; i < sizeof compose / sizeof compose[0]; i++) {
+    int i;
+    for (i = 0; i < NELEM(compose); i++) {
         int base = -1, acc, y, g;
         unsigned long b = compose[i].base;
         const char *sc = b < 128 ? strchr(small_caps_order, (int)b) : NULL;
@@ -249,7 +250,7 @@ static void make_accented(Font *f)
 void font_build(Font *f, int w, int h, const char *const *src,
                 const char *name)
 {
-    size_t i;
+    int i;
 
     f->w = w;
     f->h = h;
@@ -258,7 +259,7 @@ void font_build(Font *f, int w, int h, const char *const *src,
     for (i = 0; i < FONT_MAP_SIZE; i++)
         f->map[i] = -1;
     parse(f, src, name);
-    for (i = 0; i < sizeof boxes / sizeof boxes[0]; i++)
+    for (i = 0; i < NELEM(boxes); i++)
         make_box(f, boxes[i].cp, boxes[i].up, boxes[i].down, boxes[i].left,
                  boxes[i].right);
     make_blocks(f);

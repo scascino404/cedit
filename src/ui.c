@@ -9,7 +9,6 @@
 #include "ui.h"
 #include "config.h"
 #include "logo.h"
-#include "path.h"
 #include "sys.h"
 #include "utf8.h"
 #include "util.h"
@@ -493,13 +492,20 @@ static void file_dialog(App *a, int save)
     load_dir(a);
 }
 
+/* The OK button that closes a dialog which only shows something. */
+static void ok_button(Dialog *d)
+{
+    static const int ids[] = {ID_OK};
+    static const char *const labels[] = {"OK"};
+    dlg_buttons(d, d->h - 3, ids, labels, 1);
+    d->def_id = ID_OK;
+}
+
 static void message_dialog(App *a, const char *title, const char *l1,
                            const char *l2)
 {
     Dialog *d = &a->dlg;
     int w = 40, w1 = utf8_width(l1) + 6, w2 = l2 ? utf8_width(l2) + 6 : 0;
-    static const int ids[] = {ID_OK};
-    static const char *const labels[] = {"OK"};
     if (w1 > w)
         w = w1;
     if (w2 > w)
@@ -509,8 +515,7 @@ static void message_dialog(App *a, const char *title, const char *l1,
     dlg_add(d, W_LABEL, ID_NONE, 3, 2, w - 6, l1);
     if (l2)
         dlg_add(d, W_LABEL, ID_NONE, 3, 3, w - 6, l2);
-    dlg_buttons(d, d->h - 3, ids, labels, 1);
-    d->def_id = ID_OK;
+    ok_button(d);
 }
 
 /* The rows the logo takes at the top of the About box, at the 8 px font's
@@ -520,15 +525,12 @@ static void message_dialog(App *a, const char *title, const char *l1,
 static void about_dialog(App *a)
 {
     static const char line[] = "Classic Text Editor";
-    static const int ids[] = {ID_OK};
-    static const char *const labels[] = {"OK"};
     Dialog *d = &a->dlg;
     int n = utf8_width(line), w = n + 12;
 
     dlg_begin(d, DLG_ABOUT, "About", w, 2 + LOGO_ROWS + 1 + 1 + 4);
     dlg_add(d, W_LABEL, ID_NONE, (w - n) / 2, 2 + LOGO_ROWS + 1, n, line);
-    dlg_buttons(d, d->h - 3, ids, labels, 1);
-    d->def_id = ID_OK;
+    ok_button(d);
 }
 
 static void draw_logo(App *a)
@@ -546,8 +548,6 @@ static void help_dialog(App *a)
 {
     Dialog *d = &a->dlg;
     int i, w = 4, h;
-    static const int ids[] = {ID_OK};
-    static const char *const labels[] = {"OK"};
     for (i = 0; help_lines[i]; i++)
         if (utf8_width(help_lines[i]) + 6 > w)
             w = utf8_width(help_lines[i]) + 6;
@@ -559,8 +559,7 @@ static void help_dialog(App *a)
     dlg_list(d, 2, 2, w - 4, h - 6, 0, -1);
     for (i = 0; help_lines[i]; i++)
         dlg_list_add(d, help_lines[i]);
-    dlg_buttons(d, d->h - 3, ids, labels, 1);
-    d->def_id = ID_OK;
+    ok_button(d);
 }
 
 static void confirm_dialog(App *a)
@@ -720,7 +719,7 @@ static void close_window(App *a)
 {
     Window *w = win_close(&a->root, a->win);
     a->win = NULL;
-    a->drag = 0;
+    a->drag = DRAG_NONE;
     focus(a, w);
 }
 
@@ -943,7 +942,7 @@ static void file_menu(App *a)
 /* Opens or closes folder i of the file menu. */
 static void toggle_folder(App *a, int i)
 {
-    char path[sizeof a->pending_path];
+    char path[PATH_LEN];
     const char *rel;                        /* below the menu's top folder */
     int n;
 
@@ -966,7 +965,7 @@ static void toggle_folder(App *a, int i)
 /* Opens file i of the file menu, unless it is the open one. */
 static void open_listed(App *a, int i)
 {
-    char path[sizeof a->pending_path];
+    char path[PATH_LEN];
     if (a->menu.list[i].flags & LI_CHECKED)
         return;
     item_path(a, i, path, sizeof path);
@@ -1154,6 +1153,13 @@ static void save_settings(App *a)
     config_save(&c);
 }
 
+/* Turns a setting on or off, and stores the settings. */
+static void toggle(App *a, int *setting)
+{
+    *setting = !*setting;
+    save_settings(a);
+}
+
 static void set_size(App *a, int size)
 {
     screen_set_size(&a->scr, size);
@@ -1273,18 +1279,16 @@ static void command(App *a, int cmd)
     case CMD_SIZE_M:    set_size(a, SIZE_MEDIUM); break;
     case CMD_SIZE_L:    set_size(a, SIZE_LARGE); break;
     case CMD_LINENUM:
-        a->show_lnum = !a->show_lnum;
+        toggle(a, &a->show_lnum);
         follow_all(a);
-        save_settings(a);
         break;
     case CMD_WRAP:
-        a->opt.wrap = !a->opt.wrap;
+        toggle(a, &a->opt.wrap);
         for (w = win_first(a->root); w; w = win_next(w)) {
             w->ed.left = 0;
             ed_scroll(&w->ed, 0);       /* into the rows, or lines, there are */
         }
         follow_all(a);
-        save_settings(a);
         break;
     case CMD_TAB4:
     case CMD_TAB8:
@@ -1293,22 +1297,12 @@ static void command(App *a, int cmd)
         save_settings(a);
         break;
     case CMD_DARK:
-        a->dark = !a->dark;
+        toggle(a, &a->dark);
         apply_theme(a);
-        save_settings(a);
         break;
-    case CMD_AUTOINDENT:
-        a->opt.autoindent = !a->opt.autoindent;
-        save_settings(a);
-        break;
-    case CMD_SPACES:
-        a->opt.spaces = !a->opt.spaces;
-        save_settings(a);
-        break;
-    case CMD_HIGHLIGHT:
-        a->highlight = !a->highlight;
-        save_settings(a);
-        break;
+    case CMD_AUTOINDENT: toggle(a, &a->opt.autoindent); break;
+    case CMD_SPACES:    toggle(a, &a->opt.spaces); break;
+    case CMD_HIGHLIGHT: toggle(a, &a->highlight); break;
     case CMD_FILES:     file_menu(a); break;
     case CMD_SPLIT_V:   split_window(a, 1); break;
     case CMD_SPLIT_H:   split_window(a, 0); break;
@@ -1574,12 +1568,15 @@ void app_draw(App *a)
 /* input                                                               */
 /* ------------------------------------------------------------------ */
 
-/* Converts a cell in the focused window's text area to a buffer
- * position. */
+/* The buffer position at a cell of the focused window, taken into its
+ * text area: left of it (on the line numbers) is its first column, and
+ * above or below it its top or bottom row. */
 static void cell_to_pos(App *a, int cx, int cy, long *ln, size_t *col)
 {
     TextArea ta = text_area(a, a->win);
-    ed_pos_at(&a->win->ed, cy - ta.y, cx - ta.x, ln, col);
+    int x = cx < ta.x ? ta.x : cx;
+    int y = cy < ta.y ? ta.y : cy >= ta.y + ta.h ? ta.y + ta.h - 1 : cy;
+    ed_pos_at(&a->win->ed, y - ta.y, x - ta.x, ln, col);
 }
 
 /* A click on the scrollbar scrolls, or grabs the thumb to drag it. */
@@ -1591,7 +1588,7 @@ static void scrollbar_click(App *a, int cy, TextArea ta)
     if (rows) {
         ed_scroll(ed, rows);
     } else {
-        a->drag = 2;
+        a->drag = DRAG_THUMB;
         a->drag_grab = cy - ta.y - 1 - sb.pos;
     }
 }
@@ -1627,7 +1624,7 @@ static void right_click(App *a, int cx, int cy)
     long ln, sy, ey;
     size_t col, sx, ex;
 
-    if (a->dlg.kind != DLG_NONE || a->drag)
+    if (a->dlg.kind != DLG_NONE || a->drag != DRAG_NONE)
         return;
     if (a->menu.open >= 0) {
         menu_command(a, menu_click(&a->menu, cx, cy));
@@ -1639,9 +1636,8 @@ static void right_click(App *a, int cx, int cy)
     ta = text_area(a, w);
     if (cy < ta.y || cy >= ta.y + ta.h || cx < ta.x - ta.gutter || cx >= ta.x + ta.w)
         return;
-    cell_to_pos(a, cx < ta.x ? ta.x : cx, cy, &ln, &col);
-    if (!ed_sel_range(&w->ed, &sy, &sx, &ey, &ex) ||
-        ln < sy || (ln == sy && col < sx) || ln > ey || (ln == ey && col >= ex)) {
+    cell_to_pos(a, cx, cy, &ln, &col);
+    if (!ed_sel_range(&w->ed, &sy, &sx, &ey, &ex) || !in_sel(ln, col, sy, sx, ey, ex)) {
         ed_set_cursor(&w->ed, ln, col, 0);
         w->ed.follow = 0;
     }
@@ -1689,7 +1685,7 @@ static void mouse_down(App *a, const SDL_MouseButtonEvent *b)
     }
     /* a border between windows moves with the pointer */
     if ((w = win_border_at(a->root, cx, cy)) != NULL) {
-        a->drag = 3;
+        a->drag = DRAG_BORDER;
         a->drag_split = w;
         a->drag_grab = w->vertical ? cx - w->b->x : cy - w->b->y;
         return;
@@ -1705,20 +1701,19 @@ static void mouse_down(App *a, const SDL_MouseButtonEvent *b)
     } else if (cx >= ta.x - ta.gutter) {
         long ln;
         size_t col;
-        cell_to_pos(a, cx < ta.x ? ta.x : cx, cy, &ln, &col);
+        cell_to_pos(a, cx, cy, &ln, &col);
         ed_set_cursor(&w->ed, ln, col, (SDL_GetModState() & KMOD_SHIFT) != 0);
         if (a->click_count == 2)
             ed_select_word(&w->ed);
         else if (a->click_count >= 3)
             ed_select_line(&w->ed);
         w->ed.follow = 0;
-        a->drag = 1;
+        a->drag = DRAG_TEXT;
     }
 }
 
 static void mouse_motion(App *a, const SDL_MouseMotionEvent *m)
 {
-    TextArea ta = text_area(a, a->win);
     int cx, cy;
 
     screen_pointer(&a->scr, m->x, m->y, 1);
@@ -1726,22 +1721,20 @@ static void mouse_motion(App *a, const SDL_MouseMotionEvent *m)
     a->mouse_x = cx;
     a->mouse_y = cy;
 
-    if (a->drag == 1) {
+    if (a->drag == DRAG_TEXT) {
         long ln;
         size_t col;
-        int x = cx < ta.x ? ta.x : cx;
-        int y = cy < ta.y ? ta.y : cy >= ta.y + ta.h ? ta.y + ta.h - 1 : cy;
-        cell_to_pos(a, x, y, &ln, &col);
+        cell_to_pos(a, cx, cy, &ln, &col);
         if (a->click_count == 1)
             ed_set_cursor(&a->win->ed, ln, col, 1);
         a->win->ed.follow = 1;
         return;
     }
-    if (a->drag == 2) {
+    if (a->drag == DRAG_THUMB) {
         scrollbar_drag(a, cy);
         return;
     }
-    if (a->drag == 3) {
+    if (a->drag == DRAG_BORDER) {
         Window *sp = a->drag_split;
         win_resize(sp, (sp->vertical ? cx - sp->x : cy - sp->y) - a->drag_grab);
         return;
@@ -2008,7 +2001,7 @@ void app_event(App *a, const SDL_Event *e)
         break;
     case SDL_MOUSEBUTTONUP:
         if (e->button.button == SDL_BUTTON_LEFT)
-            a->drag = 0;
+            a->drag = DRAG_NONE;
         break;
     case SDL_MOUSEMOTION:
         mouse_motion(a, &e->motion);
@@ -2056,7 +2049,7 @@ void app_tick(App *a)
     }
     menu_tick(&a->menu, t);
     /* keep selecting while dragging past the top or bottom edge */
-    if (a->drag == 1) {
+    if (a->drag == DRAG_TEXT) {
         TextArea ta = text_area(a, a->win);
         if (a->mouse_y < ta.y || a->mouse_y >= ta.y + ta.h)
             ed_move(&a->win->ed, a->mouse_y < ta.y ? MV_UP : MV_DOWN, 1);
@@ -2075,7 +2068,7 @@ int app_timeout(App *a)
         if (buf_loading(w->ed.doc->buf) ||
             (a->highlight && hl_behind(doc_hl(&w->ed), last_shown(a, w))))
             return 0;
-    if (a->drag == 1)
+    if (a->drag == DRAG_TEXT)
         return 40;
     if (a->msg_until > t && a->msg_until < next)
         next = a->msg_until;

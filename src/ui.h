@@ -7,6 +7,7 @@
 #include "dialog.h"
 #include "editor.h"
 #include "menu.h"
+#include "path.h"
 #include "screen.h"
 #include "theme.h"
 #include "window.h"
@@ -14,6 +15,9 @@
 /* App.job: a search, Replace All, or a move waiting for the file to load:
  * to a line, to the end, or selecting all */
 enum { J_NONE, J_FIND, J_REPLACE, J_GOTO, J_DOCEND, J_SELALL };
+
+/* App.drag: what the held left button drags */
+enum { DRAG_NONE, DRAG_TEXT, DRAG_THUMB, DRAG_BORDER };
 
 typedef struct App {
     Screen scr;
@@ -27,11 +31,11 @@ typedef struct App {
     int alt_tap;            /* Alt pressed alone: toggles the menu on release */
 
     Dialog dlg;
-    char dir[4096];         /* directory shown by the file dialogs, and the
+    char dir[PATH_LEN];     /* directory shown by the file dialogs, and the
                                top of the file menu */
-    char overwrite[4096];   /* existing file the user agreed to replace */
+    char overwrite[PATH_LEN];   /* existing file the user agreed to replace */
     int pending;            /* action waiting for "save changes?" */
-    char pending_path[4096];
+    char pending_path[PATH_LEN];
 
     char msg[256];          /* message in the focused window's bottom
                                border, shown until msg_until */
@@ -41,8 +45,8 @@ typedef struct App {
     unsigned long blink_next;
     int focused;
 
-    int drag;               /* 1 selecting text, 2 scrollbar thumb,
-                               3 the border of split drag_split */
+    int drag;               /* DRAG_*: a selection, the scrollbar thumb,
+                               or the border of split drag_split */
     int drag_grab;
     Window *drag_split;
     int mouse_x, mouse_y;   /* in cells */
@@ -80,7 +84,7 @@ typedef struct App {
      * save_thread, which reads save_doc's text meanwhile. */
     BufSave *save;
     Doc *save_doc;
-    char save_path[4096];
+    char save_path[PATH_LEN];
     SDL_Thread *save_thread;
     SDL_atomic_t save_ended;    /* set by save_thread when it is done */
     int save_quit;              /* exit once the save is over */

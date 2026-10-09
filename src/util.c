@@ -28,6 +28,13 @@ char *xstrdup(const char *s)
     return (char *)memcpy(xmalloc(n), s, n);
 }
 
+void *xgrow(void *p, int n, size_t size)
+{
+    if ((n & (n - 1)) == 0)
+        p = xrealloc(p, (size_t)(n ? 2 * n : 1) * size);
+    return p;
+}
+
 void str_copy(char *dst, size_t size, const char *src)
 {
     size_t n = strlen(src);

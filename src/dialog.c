@@ -30,10 +30,7 @@ void dlg_list_clear(Dialog *d)
 
 void dlg_list_add(Dialog *d, const char *item)
 {
-    int n = d->nitems;
-    /* the capacity is n rounded up to a power of two */
-    if ((n & (n - 1)) == 0)
-        d->items = (char **)xrealloc(d->items, (size_t)(n ? 2 * n : 1) * sizeof(char *));
+    d->items = (char **)xgrow(d->items, d->nitems, sizeof *d->items);
     d->items[d->nitems++] = xstrdup(item);
 }
 

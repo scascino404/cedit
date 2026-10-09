@@ -28,12 +28,11 @@ static const char *const arrow[] = {
 
 Uint32 *pointer_pixels(int *w, int *h, int *hx, int *hy)
 {
-    const char *const *art = arrow;
     Uint32 *px;
     int x, y;
 
-    *w = (int)strlen(art[0]);
-    for (*h = 0; art[*h]; (*h)++)
+    *w = (int)strlen(arrow[0]);
+    for (*h = 0; arrow[*h]; (*h)++)
         ;
     *hx = *hy = 0;
     px = (Uint32 *)SDL_malloc((size_t)*w * *h * sizeof(Uint32));
@@ -41,7 +40,7 @@ Uint32 *pointer_pixels(int *w, int *h, int *hx, int *hy)
         return NULL;
     for (y = 0; y < *h; y++)
         for (x = 0; x < *w; x++) {
-            char p = art[y][x];
+            char p = arrow[y][x];
             px[y * *w + x] = p == 'o' ? 0xFFFFFFFFu : p == ' ' ? 0 : 0xFF000000u;
             if (p == '+') {
                 *hx = x;

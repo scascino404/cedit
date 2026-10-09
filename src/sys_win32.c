@@ -395,8 +395,8 @@ int sys_same_file(const char *a, const char *b)
     char *fa = _fullpath(NULL, a, 0), *fb = _fullpath(NULL, b, 0);
     WCHAR wa[4096 + 256], wb[4096 + 256];
     int same = fa && fb &&
-               MultiByteToWideChar(CP_ACP, 0, fa, -1, wa, (int)(sizeof wa / sizeof wa[0])) &&
-               MultiByteToWideChar(CP_ACP, 0, fb, -1, wb, (int)(sizeof wb / sizeof wb[0])) &&
+               MultiByteToWideChar(CP_ACP, 0, fa, -1, wa, NELEM(wa)) &&
+               MultiByteToWideChar(CP_ACP, 0, fb, -1, wb, NELEM(wb)) &&
                CompareStringOrdinal(wa, -1, wb, -1, TRUE) == CSTR_EQUAL;
     free(fa);
     free(fb);

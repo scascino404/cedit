@@ -463,18 +463,24 @@ void screen_present(Screen *s)
     }
 }
 
+/* Window coordinates to output pixels. */
+static void to_output(const Screen *s, int wx, int wy, int *px, int *py)
+{
+    *px = wx * s->out_w / (s->win_w ? s->win_w : 1);
+    *py = wy * s->out_h / (s->win_h ? s->win_h : 1);
+}
+
 void screen_pointer(Screen *s, int wx, int wy, int visible)
 {
-    s->ptr_x = wx * s->out_w / (s->win_w ? s->win_w : 1);
-    s->ptr_y = wy * s->out_h / (s->win_h ? s->win_h : 1);
+    to_output(s, wx, wy, &s->ptr_x, &s->ptr_y);
     s->ptr_visible = visible && wx >= 0 && wy >= 0 && wx < s->win_w &&
                      wy < s->win_h;
 }
 
 void screen_cell_at(const Screen *s, int wx, int wy, int *cx, int *cy)
 {
-    int px = wx * s->out_w / (s->win_w ? s->win_w : 1);
-    int py = wy * s->out_h / (s->win_h ? s->win_h : 1);
+    int px, py;
+    to_output(s, wx, wy, &px, &py);
     *cx = px / (s->cw * s->scale);
     *cy = py / (s->ch * s->scale);
     if (*cx >= s->cols)

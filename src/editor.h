@@ -100,8 +100,7 @@ int ed_views(const Editor *ed);
  * views keep the document shown before. */
 void ed_new(Editor *ed);
 int ed_open(Editor *ed, const char *path, char *err, size_t errlen);
-int ed_save(Editor *ed, const char *path, char *err, size_t errlen);
-/* Marks the document saved as path, after a save done in steps. */
+/* Marks the document saved as path, once a save (buf_save_begin) is over. */
 void ed_set_saved(Editor *ed, const char *path);
 int ed_modified(const Editor *ed);
 const char *ed_name(const Editor *ed);
@@ -175,8 +174,6 @@ int ed_find(Editor *ed, int backward);
 /* Replaces the selection with opt->repl if it is a match. Returns 1 if it
  * was. */
 int ed_replace_selection(Editor *ed);
-/* ed_replace_selection, then ed_find forward. */
-int ed_replace(Editor *ed);
 long ed_replace_all(Editor *ed);
 void ed_goto(Editor *ed, long line);
 

@@ -95,17 +95,17 @@ static const struct {
     const MenuItem *items;
     int n;
 } menus[] = {
-    {"&File", m_file, sizeof m_file / sizeof m_file[0]},
-    {"&Edit", m_edit, sizeof m_edit / sizeof m_edit[0]},
-    {"&Search", m_search, sizeof m_search / sizeof m_search[0]},
-    {"&View", m_view, sizeof m_view / sizeof m_view[0]},
-    {"&Window", m_window, sizeof m_window / sizeof m_window[0]},
-    {"&Help", m_help, sizeof m_help / sizeof m_help[0]},
-    {NULL, m_context, sizeof m_context / sizeof m_context[0]},
+    {"&File", m_file, NELEM(m_file)},
+    {"&Edit", m_edit, NELEM(m_edit)},
+    {"&Search", m_search, NELEM(m_search)},
+    {"&View", m_view, NELEM(m_view)},
+    {"&Window", m_window, NELEM(m_window)},
+    {"&Help", m_help, NELEM(m_help)},
+    {NULL, m_context, NELEM(m_context)},
     {NULL, NULL, 0}         /* the list menu, from MenuBar.list */
 };
 /* The bar shows all menus but the last two, the popups. */
-#define NMENUS ((int)(sizeof menus / sizeof menus[0]) - 2)
+#define NMENUS (NELEM(menus) - 2)
 #define CONTEXT NMENUS
 #define LIST (NMENUS + 1)
 
@@ -179,13 +179,18 @@ static void geometry(const MenuBar *mb, int *x, int *y, int *w, int *h)
         *x = mb->cols - *w < 0 ? 0 : mb->cols - *w;
 }
 
-/* Cells for the label of list item i; a longer one is cut off, or moves
- * while highlighted. */
+/* Cells for the label of list item it, in the list menu w cells wide; a
+ * longer one is cut off, or moves while highlighted. */
+static int label_room(const MenuBar *m, const ListItem *it, int w)
+{
+    return w - 8 - m->list_kw - indent(it);
+}
+
 static int room(const MenuBar *m, int i)
 {
     int x, y, w, h;
     geometry(m, &x, &y, &w, &h);
-    return w - 8 - m->list_kw - indent(&m->list[i]);
+    return label_room(m, &m->list[i], w);
 }
 
 /* The item of the open menu at a cell, or -1. */
@@ -344,9 +349,7 @@ void menu_list_insert(MenuBar *m, int i, const char *label, const char *keys,
     int n = m->nlist;
     size_t ll = strlen(label) + 1, kl = strlen(keys) + 1;
     ListItem *it;
-    /* the capacity is n rounded up to a power of two */
-    if ((n & (n - 1)) == 0)
-        m->list = (ListItem *)xrealloc(m->list, (size_t)(n ? 2 * n : 1) * sizeof *m->list);
+    m->list = (ListItem *)xgrow(m->list, n, sizeof *m->list);
     memmove(&m->list[i + 1], &m->list[i], (size_t)(n - i) * sizeof *m->list);
     it = &m->list[i];
     it->label = (char *)xmalloc(ll + kl);
@@ -458,7 +461,7 @@ static void draw_list_item(const MenuBar *m, Screen *s, const Theme *t, int i,
     if (it->flags & LI_FOLDER)
         screen_put(s, lx - 2, row, it->flags & LI_OPEN ? 0x25BC : 0x25BA, fg, bg);
     draw_ticker(s, lx, row, it->label, m->tick_item == i ? m->tick_pos : 0,
-                w - 8 - m->list_kw - indent(it), fg, bg);
+                label_room(m, it, w), fg, bg);
     screen_puts(s, x + w - 2 - utf8_width(it->keys), row, it->keys, fg, bg, 20);
 }
 

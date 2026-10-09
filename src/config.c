@@ -4,6 +4,7 @@
 #include "config.h"
 #include "screen.h"
 #include "sys.h"
+#include "util.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -31,11 +32,10 @@ static const struct {
     {"window_width", offsetof(Config, window_w), INT},
     {"window_height", offsetof(Config, window_h), INT}
 };
-#define NKEYS (sizeof keys / sizeof keys[0])
 
 static const char *const size_names[SIZE_COUNT] = {"small", "medium", "large"};
 
-static int *field(Config *c, size_t i)
+static int *field(Config *c, int i)
 {
     return (int *)((char *)c + keys[i].off);
 }
@@ -90,10 +90,10 @@ void config_load(Config *c)
         return;
     while (fgets(line, sizeof line, f)) {
         char key[64], val[64];
-        size_t i;
+        int i;
         if (sscanf(line, " %63[a-z_] = %63s", key, val) != 2)
             continue;
-        for (i = 0; i < NKEYS; i++)
+        for (i = 0; i < NELEM(keys); i++)
             if (strcmp(key, keys[i].key) == 0)
                 *field(c, i) = parse_value(keys[i].type, val);
     }
@@ -111,12 +111,12 @@ void config_save(const Config *c)
 {
     char path[4200];
     FILE *f;
-    size_t i;
+    int i;
 
     if (!config_path(path, sizeof path, 1) || !(f = fopen(path, "w")))
         return;
     fprintf(f, "# cedit settings\n");
-    for (i = 0; i < NKEYS; i++) {
+    for (i = 0; i < NELEM(keys); i++) {
         int v = *(const int *)((const char *)c + keys[i].off);
         fprintf(f, "%s = ", keys[i].key);
         if (keys[i].type == BOOL)

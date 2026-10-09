@@ -9,6 +9,8 @@
 
 /* Paths use '/', on Windows too (see sys.h). */
 
+#define PATH_LEN 4096       /* room for the longest path the UI keeps */
+
 /* dir, a '/' (unless dir ends in one, as the root does) and name, into
  * out[size]. */
 void path_join(char *out, size_t size, const char *dir, const char *name);

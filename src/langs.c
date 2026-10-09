@@ -7,8 +7,7 @@
  * contain. See syntax.h for the rule kinds and flags.
  */
 #include "syntax.h"
-
-#define NELEM(a) ((int)(sizeof (a) / sizeof (a)[0]))
+#include "util.h"
 
 /* rule constructors */
 #define LINE(open, flags, cls)  {R_LINE, cls, open, NULL, 0, 0, flags, NULL}

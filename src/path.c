@@ -90,15 +90,13 @@ int dir_list(const char *dir, int parent, const char *mark, DirEntry **out)
     if (!d)
         return -1;
     while (sys_dir_next(d, &e)) {
-        char full[4096 + 256];
+        char full[PATH_LEN + 256];
         size_t len = strlen(e.name);
         DirEntry *de;
         if (e.name[0] == '.' &&
             !(parent && strcmp(e.name, "..") == 0 && sys_root_len(dir) != strlen(dir)))
             continue;
-        /* the capacity is n rounded up to a power of two */
-        if ((n & (n - 1)) == 0)
-            ents = (DirEntry *)xrealloc(ents, (size_t)(n ? 2 * n : 1) * sizeof *ents);
+        ents = (DirEntry *)xgrow(ents, n, sizeof *ents);
         de = &ents[n++];
         de->name = (char *)xmalloc(len + 2);
         memcpy(de->name, e.name, len + 1);

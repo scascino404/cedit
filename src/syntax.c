@@ -385,6 +385,13 @@ static const char *interpreter(const char *s, size_t len, size_t *n)
     return j > i ? s + i : NULL;
 }
 
+/* Language k, ready to lex. */
+static const Syntax *lang(int k)
+{
+    syn_prepare(&syn_langs[k]);
+    return &syn_langs[k];
+}
+
 const Syntax *syn_detect(const char *path, const char *line1, size_t len)
 {
     const char *base, *ext, *prog = NULL;
@@ -397,18 +404,14 @@ const Syntax *syn_detect(const char *path, const char *line1, size_t len)
         ext = strrchr(base, '.');
         for (k = 0; k < syn_nlangs; k++)
             if (in_list(syn_langs[k].files, base, strlen(base), 0) ||
-                (ext && in_list(syn_langs[k].files, ext, strlen(ext), 0))) {
-                syn_prepare(&syn_langs[k]);
-                return &syn_langs[k];
-            }
+                (ext && in_list(syn_langs[k].files, ext, strlen(ext), 0)))
+                return lang(k);
     }
     if (line1)
         prog = interpreter(line1, len, &n);
     for (k = 0; prog && k < syn_nlangs; k++)
-        if (in_list(syn_langs[k].interp, prog, n, 1)) {
-            syn_prepare(&syn_langs[k]);
-            return &syn_langs[k];
-        }
+        if (in_list(syn_langs[k].interp, prog, n, 1))
+            return lang(k);
     return NULL;
 }
 

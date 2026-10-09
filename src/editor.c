@@ -180,14 +180,6 @@ int ed_open(Editor *ed, const char *path, char *err, size_t errlen)
     return is_new;
 }
 
-int ed_save(Editor *ed, const char *path, char *err, size_t errlen)
-{
-    if (buf_save(ed->doc->buf, path, err, errlen) < 0)
-        return -1;
-    ed_set_saved(ed, path);
-    return 0;
-}
-
 void ed_set_saved(Editor *ed, const char *path)
 {
     Doc *d = ed->doc;
@@ -1387,13 +1379,6 @@ int ed_replace_selection(Editor *ed)
     ed->sel = 0;
     after_edit(ed);
     return 1;
-}
-
-int ed_replace(Editor *ed)
-{
-    /* replace the selection if it is a match, then find the next one */
-    ed_replace_selection(ed);
-    return ed_find(ed, 0);
 }
 
 /* A replacement costs about as much time as searching this many bytes. */
