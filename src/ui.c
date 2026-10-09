@@ -24,6 +24,7 @@
 #define MSG_MS     4000
 #define DCLICK_MS  400
 #define LOAD_SLICE ((size_t)32 * 1024 * 1024)
+#define LEX_SLICE  ((size_t)8 * 1024 * 1024)
 
 /* actions that wait for "save changes?" */
 enum { P_NONE, P_QUIT, P_NEW, P_OPEN, P_OPEN_PATH };
@@ -403,6 +404,14 @@ static void goto_dialog(App *a)
 /* file operations and pending actions                                 */
 /* ------------------------------------------------------------------ */
 
+/* Picks the highlighting language for the file being edited. */
+static void detect_syntax(App *a)
+{
+    size_t len;
+    const char *l = ed_line(&a->ed, 0, &len);
+    hl_set(&a->hl, a->ed.buf, syn_detect(a->ed.path, l, len));
+}
+
 static void do_open_path(App *a, const char *path)
 {
     char err[256];
@@ -411,6 +420,7 @@ static void do_open_path(App *a, const char *path)
         message_dialog(a, "Error", path, err);
         return;
     }
+    detect_syntax(a);
     set_msg(a, r == 1 ? "New file: " : "Opened ", ed_name(&a->ed));
 }
 
@@ -421,6 +431,7 @@ static int do_save_path(App *a, const char *path)
         message_dialog(a, "Cannot save", path, err);
         return -1;
     }
+    detect_syntax(a);
     sprintf(info, " (%ld lines)", ed_lines(&a->ed));
     set_msg(a, "Saved ", ed_name(&a->ed));
     str_cat(a->msg, sizeof a->msg, info);
@@ -437,6 +448,7 @@ static void run_pending(App *a)
         break;
     case P_NEW:
         ed_new(&a->ed);
+        detect_syntax(a);
         break;
     case P_OPEN:
         file_dialog(a, 0);
@@ -816,6 +828,7 @@ static void save_settings(App *a)
     c.autoindent = a->ed.autoindent;
     c.line_numbers = a->show_lnum;
     c.tab_width = a->ed.tabw;
+    c.highlight = a->highlight;
     config_save(&c);
 }
 
@@ -867,6 +880,8 @@ static int cmd_checked(App *a, int cmd)
         return a->dark;
     case CMD_AUTOINDENT:
         return a->ed.autoindent;
+    case CMD_HIGHLIGHT:
+        return a->highlight;
     }
     return 0;
 }
@@ -935,6 +950,10 @@ static void command(App *a, int cmd)
         a->ed.autoindent = !a->ed.autoindent;
         save_settings(a);
         break;
+    case CMD_HIGHLIGHT:
+        a->highlight = !a->highlight;
+        save_settings(a);
+        break;
     case CMD_FILES:     file_menu(a); break;
     case CMD_HELP:      help_dialog(a); break;
     case CMD_ABOUT:
@@ -974,6 +993,7 @@ static void draw_text(App *a, TextArea ta)
         long ln = ed->top + row, d = 0;
         size_t len, i = 0;
         const char *l;
+        const unsigned char *cls;
         int y = ta.y + (int)row;
 
         if (ln >= nlines)
@@ -984,6 +1004,7 @@ static void draw_text(App *a, TextArea ta)
             screen_puts(s, ta.x - 1 - n, y, num, ln == ed->cy ? th->cur_lnum : th->lnum,
                         th->text_bg, n);
         }
+        cls = a->highlight ? hl_line(&a->hl, ln) : NULL;
         l = ed_line(ed, ln, &len);
         while (i < len && d < ed->left + ta.w) {
             unsigned long cp;
@@ -999,7 +1020,7 @@ static void draw_text(App *a, TextArea ta)
                 k = utf8_decode(l + i, len - i, &cp);
                 width = 1;
             }
-            fg = sel ? th->sel_fg : th->text_fg;
+            fg = sel ? th->sel_fg : cls ? th->hl[cls[i]] : th->text_fg;
             bg = sel ? th->sel_bg : th->text_bg;
             if (cp < 0x20 || cp == 0x7F) {
                 /* control characters: inverse ^X letter */
@@ -1550,12 +1571,20 @@ void app_event(App *a, const SDL_Event *e)
     }
 }
 
+/* The last line the text area shows. */
+static long last_shown(App *a)
+{
+    return a->ed.top + text_area(a).h - 1;
+}
+
 void app_tick(App *a)
 {
     unsigned long t = now_ms();
 
     if (buf_loading(a->ed.buf))
         buf_load_step(a->ed.buf, LOAD_SLICE);
+    if (a->highlight)
+        hl_fill(&a->hl, last_shown(a), LEX_SLICE);
     if (t >= a->blink_next) {
         a->blink_on = !a->blink_on;
         a->blink_next = t + BLINK_MS;
@@ -1574,7 +1603,7 @@ int app_timeout(App *a)
     unsigned long t = now_ms(), next = a->blink_next;
     unsigned long clock_ms = (unsigned long)(60 - time(NULL) % 60) * 1000;
 
-    if (buf_loading(a->ed.buf))
+    if (buf_loading(a->ed.buf) || (a->highlight && hl_behind(&a->hl, last_shown(a))))
         return 0;
     if (a->drag == 1)
         return 40;
@@ -1604,6 +1633,9 @@ int app_init(App *a, int argc, char **argv)
     a->ed.tabw = cfg.tab_width;
     a->show_lnum = cfg.line_numbers;
     a->dark = cfg.dark;
+    a->highlight = cfg.highlight;
+    hl_init(&a->hl);
+    detect_syntax(a);
     apply_theme(a);
     /* the system pointer stays hidden over the window; we draw our own */
     SDL_ShowCursor(SDL_DISABLE);
@@ -1626,5 +1658,6 @@ void app_quit(App *a)
     dlg_close(&a->dlg);
     menu_list_clear(&a->menu);
     ed_free(&a->ed);
+    hl_free(&a->hl);
     screen_quit(&a->scr);
 }

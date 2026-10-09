@@ -23,7 +23,7 @@ development files (`sdl2-config` must be on your `PATH`).
 
 ```sh
 make -j         # builds build/cedit
-make check      # builds and runs the buffer/undo/editor tests in build/
+make check      # builds and runs the buffer/undo/editor/syntax tests in build/
 make tools      # builds the review tools (build/fontsheet, build/uishot)
 make compdb     # regenerates build/compile_commands.json with bear
 make install    # installs to /usr/local/bin (PREFIX=... to change)
@@ -74,6 +74,7 @@ Settings are changed from the menus and remembered across sessions in
 | Line numbers | View → Line Numbers | off |
 | Tab width | View → Tab Width 4 / 8 | 4 |
 | Auto indent (Enter copies the line's leading whitespace) | Edit → Auto Indent | off |
+| Syntax highlighting | View → Syntax Highlighting | on |
 
 ### Keys
 
@@ -114,6 +115,8 @@ Settings are changed from the menus and remembered across sessions in
 | `src/menu.c` | The menu tables (every command with its label and shortcut), menu drawing and navigation, and the scrolling tree menu for files |
 | `src/dialog.c` | Generic dialog boxes: labels, input fields, checkboxes, buttons and a list box |
 | `src/theme.c` | The light and dark color themes |
+| `src/syntax.c` | Syntax highlighting: the rule-driven lexer, language detection, and the cache of lexer states at line starts |
+| `src/langs.c` | The language definitions: rules and word lists for each language |
 | `src/font8x8.c`, `src/font8x16.c` | The two hand-drawn fonts, as ASCII art |
 | `src/font.c` | Builds the glyph tables: box drawing from stroke rules, accented Latin-1 letters by composition |
 | `src/cursor.c` | Hand-drawn mouse pointers (the TempleOS arrow, I-beam, hourglass) and text cursor shapes |
@@ -130,6 +133,14 @@ Settings are changed from the menus and remembered across sessions in
   and act on its buttons in `dialog_button()`.
 - **A setting:** add a field to `Config` in `src/config.h`, with a default
   and a row in the key table in `src/config.c`.
+- **A language:** write its rules and word lists in `src/langs.c` and add a
+  row to `syn_langs` with its file extensions or names (and the
+  interpreters a `#!` line may name). The rule kinds and flags are described
+  in `src/syntax.h`. A language the rules can't describe can bring its own
+  lexer function instead.
+- **A highlight color:** the lexer tells keywords, types, comments, strings,
+  numbers and preprocessor directives apart; each theme maps them to colors
+  in its `hl` row in `src/theme.c`.
 
 ### Text sizes
 
@@ -161,6 +172,30 @@ fractional display scales (such as 1.25×), which blurs pixel art; drawing it
 ourselves keeps it exactly as sharp as the text. The trade-offs are about one
 frame of pointer lag, and that OS pointer size and accessibility settings
 don't apply inside the window.
+
+### Syntax highlighting
+
+Keywords and types are blue, comments green and strings brown, as in
+TempleOS (brighter versions of these in dark mode). The language is picked
+from the file name when a file is opened or saved, or else from a `#!` first
+line:
+
+C, C++, Python, Shell, Makefile, JavaScript, TypeScript, JSON, Go, Rust, Lua
+and Markdown.
+
+Each language is a list of rules: comments to the end of the line, spans
+from an opening to a closing delimiter (which may run over several lines,
+nest, or need a matching count as in Lua's `[==[ ]==]`), directives such as
+`#include`, and word lists. The lexer goes a line at a time, carrying what is
+still open at a line's end into the next. Its state at the start of every
+128th line is cached and dropped from the first line an edit changes, so a
+screen only needs lexing from the nearest cached state.
+
+On huge files the lexer runs in the background like the indexing (about
+280 MB/s). Until it reaches a line far from the start, such as the end of a
+1 GB file right after opening it, that part is lexed from a few hundred lines
+up as if nothing were open there. It's recolored once the background pass
+catches up.
 
 ### Themes
 

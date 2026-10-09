@@ -18,7 +18,9 @@ const Theme theme_light = {
     BLACK, LIGHTCYAN,               /* field */
     BLACK, YELLOW,                  /* focus */
     RED,                            /* directories */
-    YELLOW, BLACK, RED              /* cursor */
+    YELLOW, BLACK, RED,             /* cursor */
+    /* normal, keyword, type, comment, string, number, preprocessor */
+    {BLACK, BLUE, BLUE, GREEN, BROWN, BLACK, BLUE}
 };
 
 /* Dark mode: white on black, same blue bars and yellow block cursor */
@@ -35,5 +37,6 @@ const Theme theme_dark = {
     WHITE, BLUE,                    /* field */
     BLACK, YELLOW,                  /* focus */
     LIGHTCYAN,                      /* directories */
-    YELLOW, BLACK, LIGHTRED         /* cursor */
+    YELLOW, BLACK, LIGHTRED,        /* cursor */
+    {WHITE, LIGHTBLUE, LIGHTBLUE, LIGHTGREEN, YELLOW, WHITE, LIGHTBLUE}
 };

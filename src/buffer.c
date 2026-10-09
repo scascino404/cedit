@@ -419,6 +419,7 @@ Buffer *buf_new(void)
     memset(b, 0, sizeof *b);
     b->root = leaf_new(NULL, 0, 0, 0);
     b->gen = 1;
+    b->dirty = -1;
     return b;
 }
 
@@ -695,6 +696,13 @@ void buf_offset_to_pos(Buffer *b, size_t off, long *ln, size_t *col)
     *col = rel - start;
 }
 
+/* Notes that line ln (the first line of the edited leaf) changed. */
+static void mark_dirty(Buffer *b, long ln)
+{
+    if (b->dirty < 0 || ln < b->dirty)
+        b->dirty = ln;
+}
+
 void buf_insert(Buffer *b, size_t off, const char *s, size_t n)
 {
     Node *leaf;
@@ -707,6 +715,7 @@ void buf_insert(Buffer *b, size_t off, const char *s, size_t n)
     if (off > b->root->bytes)
         off = b->root->bytes;
     leaf = find_leaf(b, -1, off, &l0, &o0);
+    mark_dirty(b, l0);
     rel = off - o0;
     if (leaf->bytes + n <= LEAF_MAX) {
         leaf_own(leaf, n);
@@ -741,6 +750,7 @@ void buf_delete(Buffer *b, size_t off, size_t n)
         n = b->root->bytes - off;
     b->gen++;
     a = find_leaf(b, -1, off, &l0, &oa);
+    mark_dirty(b, l0);
     z = find_leaf(b, -1, off + n - 1, &l0, &oz);
     rel = off - oa;
 

@@ -5,6 +5,8 @@
 #ifndef CEDIT_THEME_H
 #define CEDIT_THEME_H
 
+#include "syntax.h"
+
 /* Color roles, as indices into the 16-color palette. */
 typedef struct Theme {
     unsigned char text_fg, text_bg;     /* document, menus, dialogs */
@@ -20,6 +22,7 @@ typedef struct Theme {
     unsigned char focus_fg, focus_bg;   /* focused field or checkbox */
     unsigned char dir;                  /* directories in the file list */
     unsigned char cursor_bg, cursor_ink, cursor_box;
+    unsigned char hl[HL_COUNT];         /* text by highlight class */
 } Theme;
 
 extern const Theme theme_light, theme_dark;

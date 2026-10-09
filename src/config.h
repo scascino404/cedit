@@ -12,6 +12,7 @@ typedef struct Config {
     int autoindent;
     int line_numbers;
     int tab_width;
+    int highlight;      /* syntax highlighting */
 } Config;
 
 /* Fills c with the defaults, then whatever the config file overrides. */

@@ -17,6 +17,8 @@ typedef struct Buffer {
     Node *root;
     int crlf;           /* 1: lines end in "\r\n" */
     unsigned long gen;  /* bumped on every change; invalidates caches */
+    long dirty;         /* lowest line changed since the highlighter (which
+                           resets it) last looked, or -1 */
 
     /* source file mapping (or heap copy) that borrowed leaves point into */
     char *map;

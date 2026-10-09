@@ -16,7 +16,8 @@ BUILD = build
 OBJ_DIR = $(BUILD)/obj
 
 CORE = editor buffer undo utf8 util
-APP  = main ui menu dialog theme screen font font8x8 font8x16 cursor config $(CORE)
+APP  = main ui menu dialog theme screen font font8x8 font8x16 cursor config \
+       syntax langs $(CORE)
 OBJ  = $(APP:%=$(OBJ_DIR)/%.o)
 LIB  = $(filter-out $(OBJ_DIR)/main.o,$(OBJ))
 
@@ -42,11 +43,16 @@ $(BUILD)/test_buffer: $(OBJ_DIR)/tests/test_buffer.o $(OBJ_DIR)/buffer.o $(OBJ_D
 $(BUILD)/test_editor: $(OBJ_DIR)/tests/test_editor.o $(CORE:%=$(OBJ_DIR)/%.o)
 	$(CC) $(CFLAGS) -o $@ $^
 
-tests: $(BUILD)/test_buffer $(BUILD)/test_editor
+$(BUILD)/test_syntax: $(OBJ_DIR)/tests/test_syntax.o $(OBJ_DIR)/syntax.o $(OBJ_DIR)/langs.o \
+                      $(OBJ_DIR)/buffer.o $(OBJ_DIR)/util.o
+	$(CC) $(CFLAGS) -o $@ $^
+
+tests: $(BUILD)/test_buffer $(BUILD)/test_editor $(BUILD)/test_syntax
 
 check: tests
 	$(BUILD)/test_buffer
 	$(BUILD)/test_editor
+	$(BUILD)/test_syntax
 
 # review tools: render the fonts / drive the UI headlessly into images
 $(BUILD)/fontsheet: $(OBJ_DIR)/tests/fontsheet.o $(OBJ_DIR)/font.o \
@@ -69,6 +75,7 @@ install: $(BUILD)/cedit
 
 clean:
 	rm -rf $(OBJ_DIR) $(BUILD)/cedit $(BUILD)/test_buffer $(BUILD)/test_editor \
+	       $(BUILD)/test_syntax \
 	       $(BUILD)/fontsheet $(BUILD)/uishot
 
 .PHONY: all tests check tools compdb install clean

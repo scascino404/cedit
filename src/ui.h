@@ -40,6 +40,9 @@ typedef struct App {
     unsigned long click_time;
     int click_count, click_x, click_y;
 
+    Highlight hl;           /* the language and lexer states of ed's buffer */
+    int highlight;          /* syntax highlighting is on */
+
     int show_lnum;
     int dark;
     char title[512];

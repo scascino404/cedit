@@ -5,7 +5,6 @@ editor. The most noticeable gaps come first; the rest are grouped by area.
 
 ## Most likely to be noticed
 
-- **No syntax highlighting.** All text is one color.
 - **No word wrap.** Long lines scroll horizontally. There is also no
   horizontal scrollbar, only the mouse wheel with `Shift` and the cursor.
 - **One file at a time.** There are no tabs, split views or file tree, and
@@ -58,6 +57,23 @@ editor. The most noticeable gaps come first; the rest are grouped by area.
 - Undo is linear, limited to 1000 steps (or 512 MiB of edits), and lost on
   close. There is no persistent undo and no undo tree.
 - No spell checking.
+
+## Syntax highlighting
+
+- Highlighting is by lexing, not parsing: it knows comments, strings,
+  keywords and a few types, not function names, variables or scopes.
+- Not handled: shell here-documents, JavaScript regular expression literals
+  (a quote inside `/'/` colors the rest of that line as a string), `${...}`
+  inside JavaScript template strings (all of it is string), C++ raw strings
+  with a delimiter (`R"x(...)x"`; `R"(...)"` works), and Markdown emphasis,
+  links and indented code blocks.
+- The language can't be chosen by hand, and there are no per-language
+  settings. A file whose name isn't recognized (and has no `#!` line) is
+  shown without highlighting. Languages are compiled in; there are no
+  syntax definition files.
+- Right after jumping far into a huge file, text inside a very long block
+  comment or string can show the wrong colors for a moment (a few seconds
+  per GB) until the background pass reaches it.
 
 ## Display
 
