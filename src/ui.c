@@ -23,8 +23,10 @@
 #define BLINK_MS   300
 #define MSG_MS     4000
 #define DCLICK_MS  400
-#define LOAD_SLICE ((size_t)32 * 1024 * 1024)
-#define LEX_SLICE  ((size_t)8 * 1024 * 1024)
+#define WORK_MS    8        /* background work per frame (loading, lexing) */
+#define INPUT_MS   1        /* ... in a frame that shows input */
+#define LOAD_SLICE ((size_t)4 * 1024 * 1024)    /* ... done in slices */
+#define LEX_SLICE  ((size_t)512 * 1024)
 
 /* actions that wait for "save changes?" */
 enum { P_NONE, P_QUIT, P_NEW, P_OPEN, P_OPEN_PATH, P_CLOSE };
@@ -1152,9 +1154,9 @@ static void draw_text(App *a, Window *w, TextArea ta)
 
         if (new_line) {
             cls = a->highlight ? hl_line(doc_hl(ed), ln) : NULL;
-            l = ed_line(ed, ln, &len);
             if (row == 0)
-                start = ed_row_start(ed, l, len, ed->top_row);
+                start = ed_line_row_start(ed, ln, ed->top_row);
+            l = ed_line(ed, ln, &len);
             new_line = 0;
         }
         if (ta.gutter && start == 0) {
@@ -1164,7 +1166,11 @@ static void draw_text(App *a, Window *w, TextArea ta)
                         th->text_bg, n);
         }
         end = ed_row_end(ed, l, len, start);
-        for (i = start; i < end && d < ed->left + ta.w;) {
+        /* skip the characters left of the view (a long line can be
+         * scrolled far to the right) */
+        i = start + ed_byte_col(ed, l + start, end - start, ed->left);
+        d = ed_disp_col(ed, l + start, end - start, i - start);
+        while (i < end && d < ed->left + ta.w) {
             unsigned long cp;
             size_t k;
             long width, c;
@@ -1726,6 +1732,10 @@ static void window_event(App *a, const SDL_WindowEvent *w)
 
 void app_event(App *a, const SDL_Event *e)
 {
+    if (e->type == SDL_KEYDOWN || e->type == SDL_TEXTINPUT ||
+        e->type == SDL_MOUSEBUTTONDOWN || e->type == SDL_MOUSEWHEEL ||
+        e->type == SDL_DROPFILE)
+        a->input = 1;
     switch (e->type) {
     case SDL_QUIT:
         if (a->dlg.kind == DLG_CONFIRM)
@@ -1795,12 +1805,21 @@ static long last_shown(App *a, Window *w)
 void app_tick(App *a)
 {
     unsigned long t = now_ms();
+    Uint64 end = SDL_GetPerformanceCounter() +
+                 SDL_GetPerformanceFrequency() * (a->input ? INPUT_MS : WORK_MS) / 1000;
     Window *w;
 
+    /* Loading and lexing go on in the background, a slice of time a frame
+     * (app_timeout has the main loop come back right away for the next):
+     * input waits for them at most that long, and the frame that shows it
+     * hardly at all. */
+    a->input = 0;
     for (w = win_first(a->root); w; w = win_next(w)) {
-        if (buf_loading(w->ed.doc->buf))
-            buf_load_step(w->ed.doc->buf, LOAD_SLICE);
-        if (a->highlight)
+        Buffer *b = w->ed.doc->buf;
+        while (buf_loading(b) && SDL_GetPerformanceCounter() < end)
+            buf_load_step(b, LOAD_SLICE);
+        while (a->highlight && hl_behind(doc_hl(&w->ed), last_shown(a, w)) &&
+               SDL_GetPerformanceCounter() < end)
             hl_fill(doc_hl(&w->ed), last_shown(a, w), LEX_SLICE);
     }
     if (t >= a->blink_next) {

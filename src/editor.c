@@ -7,10 +7,14 @@
 
 #include <stdlib.h>
 #include <string.h>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
 enum { K_NONE, K_TYPE, K_BACK, K_DEL, K_OTHER };
 
 #define GROUP_MS 1000   /* a pause this long starts a new undo step */
+#define TRIM_SIZE ((size_t)16 << 20)    /* see detach */
 
 void ed_options_init(EdOptions *opt)
 {
@@ -42,6 +46,8 @@ static void detach(Editor *ed)
 {
     Doc *d = ed->doc;
     Editor **p = &d->views;
+    int big;
+
     while (*p != ed)
         p = &(*p)->next_view;
     *p = ed->next_view;
@@ -53,10 +59,17 @@ static void detach(Editor *ed)
         return;
     if (d->free_data)
         d->free_data(d->data);
+    big = buf_size(d->buf) + d->undo.mem > TRIM_SIZE;
     buf_free(d->buf);
     undo_free(&d->undo);
     free(d->path);
     free(d);
+#ifdef __GLIBC__
+    /* glibc keeps freed memory between blocks still in use; give the
+     * pages of a big document back */
+    if (big)
+        malloc_trim(0);
+#endif
 }
 
 static void init_view(Editor *ed, EdOptions *opt)
@@ -92,10 +105,23 @@ void ed_init_view(Editor *ed, const Editor *from)
     attach(ed, from->doc);
 }
 
+static void forget_rows(Editor *ed)
+{
+    int i;
+    for (i = 0; i < ED_ROWS; i++)
+        ed->rows[i].gen = 0;
+}
+
 void ed_free(Editor *ed)
 {
+    int i;
     if (ed->doc)
         detach(ed);
+    for (i = 0; i < ED_ROWS; i++) {
+        free(ed->rows[i].start);
+        ed->rows[i].start = NULL;
+        ed->rows[i].cap = 0;
+    }
 }
 
 int ed_views(const Editor *ed)
@@ -126,6 +152,7 @@ static void set_buffer(Editor *ed, Buffer *b, const char *path)
     detach(ed);
     attach(ed, d);
     reset_view(ed);
+    forget_rows(ed);        /* the new buffer's generations start over */
 }
 
 void ed_new(Editor *ed)
@@ -227,19 +254,40 @@ static void clamp(Editor *ed)
 /* display columns                                                     */
 /* ------------------------------------------------------------------ */
 
+/* Is each of the 64 bytes at s a column: no tabs, nothing but ASCII? Long
+ * lines are counted a block at a time; the loop is shaped so that the
+ * compilers vectorize it, as count_nl in buffer.c. */
+static int plain64(const char *s)
+{
+    const unsigned char *p = (const unsigned char *)s;
+    unsigned char k = 0;
+    int j;
+    for (j = 0; j < 64; j++)
+        k |= (unsigned char)((p[j] == '\t') | (p[j] >> 7));
+    return !k;
+}
+
 long ed_disp_col(const Editor *ed, const char *s, size_t len, size_t col)
 {
-    size_t i = 0;
+    size_t i = 0, stop;
     long d = 0;
     if (col > len)
         col = len;
     while (i < col) {
-        if (s[i] == '\t') {
-            d = (d / ed->opt->tabw + 1) * ed->opt->tabw;
-            i++;
-        } else {
-            i = utf8_next(s, len, i);
-            d++;
+        if (col - i >= 64 && plain64(s + i)) {
+            i += 64;
+            d += 64;
+            continue;
+        }
+        for (stop = col - i > 64 ? i + 64 : col; i < stop;) {
+            unsigned char c = (unsigned char)s[i];
+            if (c == '\t') {
+                d = (d / ed->opt->tabw + 1) * ed->opt->tabw;
+                i++;
+            } else {
+                i = c < 0x80 ? i + 1 : utf8_next(s, len, i);
+                d++;
+            }
         }
     }
     return d;
@@ -247,14 +295,22 @@ long ed_disp_col(const Editor *ed, const char *s, size_t len, size_t col)
 
 size_t ed_byte_col(const Editor *ed, const char *s, size_t len, long dcol)
 {
-    size_t i = 0;
+    size_t i = 0, stop;
     long d = 0;
     while (i < len) {
-        long w = s[i] == '\t' ? (d / ed->opt->tabw + 1) * ed->opt->tabw - d : 1;
-        if (d + w > dcol)
-            break;
-        d += w;
-        i = utf8_next(s, len, i);
+        if (len - i >= 64 && dcol - d >= 64 && plain64(s + i)) {
+            i += 64;
+            d += 64;
+            continue;
+        }
+        for (stop = len - i > 64 ? i + 64 : len; i < stop;) {
+            unsigned char c = (unsigned char)s[i];
+            long w = c == '\t' ? (d / ed->opt->tabw + 1) * ed->opt->tabw - d : 1;
+            if (d + w > dcol)
+                return i;
+            d += w;
+            i = c < 0x80 ? i + 1 : utf8_next(s, len, i);
+        }
     }
     return i;
 }
@@ -276,14 +332,15 @@ size_t ed_row_end(const Editor *ed, const char *s, size_t len, size_t start)
     if (!ed->opt->wrap)
         return len;
     while (i < len) {
-        long cw = s[i] == '\t' ? tabw - x % tabw : 1;
+        unsigned char c = (unsigned char)s[i];
+        long cw = c == '\t' ? tabw - x % tabw : 1;
         if (x + cw > w && i > start)
             return brk > start ? brk : i;
         x += cw;
-        if (s[i] == ' ' || s[i] == '\t')
+        if (c == ' ' || c == '\t')
             brk = ++i;
         else
-            i = utf8_next(s, len, i);
+            i = c < 0x80 ? i + 1 : utf8_next(s, len, i);
     }
     return len;
 }
@@ -308,11 +365,72 @@ long ed_row_of(const Editor *ed, const char *s, size_t len, size_t col, size_t *
     return row;
 }
 
+/* The rows of line ln, found as ed_row_end does or remembered from the
+ * last time: the view asks about the same lines over and over, and a long
+ * line takes long to break into rows. */
+static const WrapRows *find_rows(Editor *ed, long ln)
+{
+    unsigned long gen;
+    size_t len, start = 0;
+    const char *l = ed_line(ed, ln, &len);      /* may load: gen after it */
+    int w = ed->opt->wrap ? ed_wrap_width(ed) : 0, i;
+    WrapRows *r;
+
+    gen = ed->doc->buf->gen;
+    for (i = 0; i < ED_ROWS; i++) {
+        r = &ed->rows[i];
+        if (r->gen == gen && r->ln == ln && r->w == w && r->tabw == ed->opt->tabw)
+            return r;
+    }
+    if (len < 1024) {
+        r = &ed->rows[0];
+    } else {
+        r = &ed->rows[1 + ed->rows_next];
+        ed->rows_next = (ed->rows_next + 1) % (ED_ROWS - 1);
+    }
+    r->gen = gen;
+    r->ln = ln;
+    r->w = w;
+    r->tabw = ed->opt->tabw;
+    r->n = 0;
+    for (;;) {
+        if (r->n == r->cap) {
+            r->cap = r->cap ? r->cap * 2 : 16;
+            r->start = (size_t *)xrealloc(r->start, (size_t)r->cap * sizeof *r->start);
+        }
+        r->start[r->n++] = start;
+        if (!w || (start = ed_row_end(ed, l, len, start)) >= len)
+            return r;
+    }
+}
+
 static long line_rows(Editor *ed, long ln)
 {
-    size_t len, start;
-    const char *l = ed_line(ed, ln, &len);
-    return ed_row_of(ed, l, len, len, &start) + 1;
+    return find_rows(ed, ln)->n;
+}
+
+size_t ed_line_row_start(Editor *ed, long ln, long row)
+{
+    const WrapRows *r = find_rows(ed, ln);
+    return r->start[row < 0 ? 0 : row < r->n ? row : r->n - 1];
+}
+
+/* ed_row_of for line ln of the document. */
+static long line_row_of(Editor *ed, long ln, size_t col, size_t *start)
+{
+    const WrapRows *r = find_rows(ed, ln);
+    long lo = 0, hi = r->n - 1;
+
+    /* the last row starting at or before col */
+    while (lo < hi) {
+        long mid = (lo + hi + 1) / 2;
+        if (r->start[mid] <= col)
+            lo = mid;
+        else
+            hi = mid - 1;
+    }
+    *start = r->start[lo];
+    return lo;
 }
 
 /* Moves the row position (*ln, *row) n rows down, or up if n < 0, as far
@@ -363,8 +481,8 @@ static void fix_top(Editor *ed)
 void ed_cursor_spot(Editor *ed, long *row, long *x)
 {
     size_t len, start;
+    long crow = line_row_of(ed, ed->cy, ed->cx, &start), ln;
     const char *l = ed_line(ed, ed->cy, &len);
-    long crow = ed_row_of(ed, l, len, ed->cx, &start), ln;
 
     *x = ed_disp_col(ed, l + start, len - start, ed->cx - start) - ed->left;
     fix_top(ed);
@@ -390,8 +508,8 @@ void ed_pos_at(Editor *ed, long row, long x, long *ln, size_t *col)
     *ln = ed->top;
     r = ed->top_row;
     step_rows(ed, ln, &r, row);
+    start = ed_line_row_start(ed, *ln, r);
     l = ed_line(ed, *ln, &len);
-    start = ed_row_start(ed, l, len, r);
     end = ed_row_end(ed, l, len, start);
     *col = start + ed_byte_col(ed, l + start, end - start, ed->left + x);
     if (*col == end && end < len)
@@ -556,7 +674,8 @@ void ed_move(Editor *ed, int how, int extend)
         long d = how == MV_UP ? -1 : how == MV_DOWN ? 1
                : (how == MV_PGUP ? -1 : 1) * (ed->view_h > 2 ? ed->view_h - 1 : 1);
         size_t start, end;
-        long row = ed_row_of(ed, l, len, ed->cx, &start);
+        long row = line_row_of(ed, ed->cy, ed->cx, &start);
+        l = ed_line(ed, ed->cy, &len);
         if (ed->want < 0)
             ed->want = ed_disp_col(ed, l + start, len - start, ed->cx - start);
         if (how == MV_PGUP || how == MV_PGDN)
@@ -566,8 +685,8 @@ void ed_move(Editor *ed, int how, int extend)
             ed->cx = how == MV_UP ? 0 : len;
             break;
         }
+        start = ed_line_row_start(ed, ed->cy, row);
         l = ed_line(ed, ed->cy, &len);
-        start = ed_row_start(ed, l, len, row);
         end = ed_row_end(ed, l, len, start);
         ed->cx = start + ed_byte_col(ed, l + start, end - start, ed->want);
         if (ed->cx == end && end < len)
@@ -673,10 +792,9 @@ void ed_scroll(Editor *ed, long rows)
 
 void ed_scroll_cursor_to(Editor *ed, long row)
 {
-    size_t len, start;
-    const char *l = ed_line(ed, ed->cy, &len);
+    size_t start;
     ed->top = ed->cy;
-    ed->top_row = ed_row_of(ed, l, len, ed->cx, &start);
+    ed->top_row = line_row_of(ed, ed->cy, ed->cx, &start);
     step_rows(ed, &ed->top, &ed->top_row, -row);
 }
 
@@ -1120,18 +1238,20 @@ int ed_find(Editor *ed, int backward)
 
     if (!plen)
         return 0;
+    /* after wrapping, only the part the first pass did not search */
     if (!backward) {
         from = have ? pos_off(ed, ey, ex) : cur_off(ed);
-        m = buf_find(ed->doc->buf, from, ed->opt->find, plen, ed->opt->icase, 0);
+        m = buf_find(ed->doc->buf, from, none, ed->opt->find, plen, ed->opt->icase, 0);
         if (m == none) {
-            m = buf_find(ed->doc->buf, 0, ed->opt->find, plen, ed->opt->icase, 0);
+            m = buf_find(ed->doc->buf, 0, from, ed->opt->find, plen, ed->opt->icase, 0);
             wrapped = 1;
         }
     } else {
         from = have ? pos_off(ed, sy, sx) : cur_off(ed);
-        m = from ? buf_find(ed->doc->buf, from - 1, ed->opt->find, plen, ed->opt->icase, 1) : none;
+        m = from ? buf_find(ed->doc->buf, from - 1, 0, ed->opt->find, plen, ed->opt->icase, 1) : none;
         if (m == none) {
-            m = buf_find(ed->doc->buf, buf_size(ed->doc->buf), ed->opt->find, plen, ed->opt->icase, 1);
+            m = buf_find(ed->doc->buf, buf_size(ed->doc->buf), from, ed->opt->find, plen,
+                         ed->opt->icase, 1);
             wrapped = 1;
         }
     }
@@ -1177,7 +1297,8 @@ long ed_replace_all(Editor *ed)
     if (!plen)
         return 0;
     group(ed, K_OTHER, 0, 0);
-    while ((m = buf_find(ed->doc->buf, off, ed->opt->find, plen, ed->opt->icase, 0)) != (size_t)-1) {
+    while ((m = buf_find(ed->doc->buf, off, (size_t)-1, ed->opt->find, plen,
+                         ed->opt->icase, 0)) != (size_t)-1) {
         del(ed, m, plen, cur);
         ins(ed, m, ed->opt->repl, rlen, cur);
         off = m + rlen;

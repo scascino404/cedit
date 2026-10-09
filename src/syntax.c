@@ -232,18 +232,23 @@ static size_t number(const Syntax *syn, const char *s, size_t len, size_t i)
     return j;
 }
 
-/* The class of word s[0..n) from the word lists. */
+/* The slot of word s[0..n) in the hash of the word lists. */
+static unsigned word_hash(const char *s, size_t n)
+{
+    const unsigned char *u = (const unsigned char *)s;
+    return (u[0] * 7u + u[n - 1] * 31u + u[n / 2] * 3u + (unsigned)n * 13u) & 255;
+}
+
+/* The class of word s[0..n) from the word lists, by their hash (a lexed
+ * line has many words; the lists have up to about a hundred). */
 static int word_class(const Syntax *syn, const char *s, size_t n)
 {
-    int k;
-    for (k = 0; k < syn->nrules; k++) {
-        const char *const *w;
-        if (syn->rules[k].kind != R_WORDS)
-            continue;
-        for (w = syn->rules[k].words; *w; w++)
-            if ((*w)[0] == s[0] && strlen(*w) == n && memcmp(*w, s, n) == 0)
-                return syn->rules[k].cls;
-    }
+    unsigned h;
+    if (n > syn->wmax)
+        return HL_NORMAL;
+    for (h = word_hash(s, n); syn->wword[h]; h = (h + 1) & 255)
+        if (syn->wlen[h] == n && memcmp(syn->wword[h], s, n) == 0)
+            return syn->wcls[h];
     return HL_NORMAL;
 }
 
@@ -252,6 +257,15 @@ unsigned syn_lex_rules(const Syntax *syn, unsigned state, const char *s,
 {
     size_t i = 0, bol = 0, j;
 
+    /* Only rules change the state: for the state alone, a line outside of
+     * everything with nothing that could open one can be skipped. */
+    if (!cls && !state) {
+        while (i < len && !syn->opens[(unsigned char)s[i]])
+            i++;
+        if (i == len)
+            return 0;
+        i = 0;
+    }
     paint(cls, 0, len, HL_NORMAL);
     while (bol < len && (s[bol] == ' ' || s[bol] == '\t'))
         bol++;
@@ -307,6 +321,25 @@ void syn_prepare(Syntax *syn)
     for (k = 0; k < syn->nrules; k++)
         if (syn->rules[k].kind != R_WORDS)
             syn->opens[(unsigned char)syn->rules[k].open[0]] = 1;
+    /* a word in two lists has the class of the first */
+    for (k = 0; k < syn->nrules; k++) {
+        const char *const *w;
+        if (syn->rules[k].kind != R_WORDS)
+            continue;
+        for (w = syn->rules[k].words; *w; w++) {
+            size_t n = strlen(*w);
+            unsigned h = word_hash(*w, n);
+            while (syn->wword[h] && !(syn->wlen[h] == n && memcmp(syn->wword[h], *w, n) == 0))
+                h = (h + 1) & 255;
+            if (syn->wword[h])
+                continue;
+            syn->wword[h] = *w;
+            syn->wlen[h] = (unsigned char)n;
+            syn->wcls[h] = (unsigned char)syn->rules[k].cls;
+            if (n > syn->wmax)
+                syn->wmax = n;
+        }
+    }
     syn->ready = 1;
 }
 
@@ -396,6 +429,7 @@ void hl_init(Highlight *h)
     h->cap = 64;
     h->ckpt = (unsigned *)xmalloc((size_t)h->cap * sizeof *h->ckpt);
     h->memo_ln = -1;
+    h->cls_ln = -1;
 }
 
 void hl_free(Highlight *h)
@@ -413,6 +447,7 @@ void hl_set(Highlight *h, Buffer *b, const Syntax *syn)
     h->ckpt[0] = 0;
     h->nckpt = 1;
     h->memo_ln = -1;
+    h->cls_ln = -1;
     b->dirty = -1;
 }
 
@@ -491,6 +526,10 @@ const unsigned char *hl_line(Highlight *h, long ln)
     if (!h->syn)
         return NULL;
     sync(h);
+    /* the same line again (a long one is slow to lex), with the same
+     * text and the same states known */
+    if (ln == h->cls_ln && h->cls_gen == h->buf->gen && h->cls_nckpt == h->nckpt)
+        return h->cls;
     st = state_at(h, ln);
     s = buf_line(h->buf, ln, &len);
     if (len + 1 > h->cls_cap) {
@@ -500,6 +539,9 @@ const unsigned char *hl_line(Highlight *h, long ln)
     }
     h->memo_state = syn_lex(h->syn, st, s, len, h->cls);
     h->memo_ln = ln + 1;
+    h->cls_ln = ln;
+    h->cls_gen = h->buf->gen;
+    h->cls_nckpt = h->nckpt;
     return h->cls;
 }
 
@@ -524,4 +566,5 @@ void hl_fill(Highlight *h, long target, size_t budget)
     ln = (h->nckpt - 1) * HL_STEP;
     run(h, &ln, target, h->ckpt[h->nckpt - 1], 1, budget);
     h->memo_ln = -1;            /* it may have been guessed */
+    h->cls_ln = -1;
 }

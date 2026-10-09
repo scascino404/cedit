@@ -80,6 +80,10 @@ struct Syntax {
     int ready;
     unsigned char opens[256];   /* a rule's open starts with this byte */
     unsigned char wordc[256];   /* word characters */
+    /* the words of the R_WORDS rules, hashed (see word_class) */
+    const char *wword[256];     /* NULL: an empty slot */
+    unsigned char wlen[256], wcls[256];
+    size_t wmax;                /* the longest one */
 };
 
 /* The languages (langs.c). */
@@ -115,8 +119,11 @@ typedef struct Highlight {
     long memo_ln;           /* the line after the last one lexed by
                                hl_line, and its state; -1 none */
     unsigned memo_state;
-    unsigned char *cls;     /* classes of the line hl_line lexed last */
+    unsigned char *cls;     /* classes of the line hl_line lexed last, */
     size_t cls_cap;
+    long cls_ln;            /* that line (-1 none), */
+    unsigned long cls_gen;  /* the buffer generation */
+    long cls_nckpt;         /* and nckpt then */
 } Highlight;
 
 void hl_init(Highlight *h);

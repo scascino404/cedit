@@ -273,12 +273,113 @@ static void test_far(void)
     buf_free(b);
 }
 
+/* For every language, lexing for the state alone (which skips some lines)
+ * ends lines in the same states as lexing their classes. */
+static void test_states(void)
+{
+    static const char *const parts[] = {
+        "a", "a", "a", "a", " ", " ", "\t", "1", "1'0", "x1", "_", "$", "-", "\"",
+        "'", "`", "/*", "*/", "//", "#", "--", "[[", "]]", "[==[", "]==]",
+        "--[=[", "r#\"", "\"#", "R\"(", ")\"", "\\", "<!--", "-->", "```",
+        "~~~", "\"\"\"", "'''", "(", ";", "{"};
+    char line[200];
+    unsigned char cls[200];
+    unsigned long r = 7;
+    int l, k;
+
+    for (l = 0; l < syn_nlangs; l++) {
+        const Syntax *syn = &syn_langs[l];
+        unsigned st = 0;
+        syn_prepare(&syn_langs[l]);
+        for (k = 0; k < 20000; k++) {
+            size_t len = 0;
+            unsigned a, b;
+            int nparts = (int)((r >> 8) % 12), p;
+            for (p = 0; p < nparts; p++) {
+                const char *t;
+                r = r * 1103515245UL + 12345UL;
+                /* mostly plain text, so that many lines have no opens */
+                t = (r >> 20) % 4 ? parts[(r >> 8) % 7] : parts[(r >> 8) % 40];
+                memcpy(line + len, t, strlen(t));
+                len += strlen(t);
+            }
+            r = r * 1103515245UL + 12345UL;
+            a = syn_lex(syn, st, line, len, NULL);
+            b = syn_lex(syn, st, line, len, cls);
+            if (a != b) {
+                printf("FAIL %s: \"%.*s\" from state %u: %u, want %u\n", syn->name,
+                       (int)len, line, st, a, b);
+                failures++;
+                break;
+            }
+            st = b;
+        }
+    }
+}
+
+/* The class of word s[0..n): of the first list that has it. */
+static int ref_word_class(const Syntax *syn, const char *s, size_t n)
+{
+    int k;
+    for (k = 0; k < syn->nrules; k++) {
+        const char *const *w;
+        if (syn->rules[k].kind != R_WORDS)
+            continue;
+        for (w = syn->rules[k].words; *w; w++)
+            if (strlen(*w) == n && memcmp(*w, s, n) == 0)
+                return syn->rules[k].cls;
+    }
+    return HL_NORMAL;
+}
+
+/* Every word of every language's lists, and words a letter off, get the
+ * class of the lists (which word_class looks up in a hash). */
+static void test_words(void)
+{
+    int l, k;
+    for (l = 0; l < syn_nlangs; l++) {
+        Syntax *syn = &syn_langs[l];
+        syn_prepare(syn);
+        for (k = 0; k < syn->nrules; k++) {
+            const char *const *w;
+            if (syn->rules[k].kind != R_WORDS)
+                continue;
+            for (w = syn->rules[k].words; *w; w++) {
+                char word[64];
+                unsigned char cls[64];
+                size_t n = strlen(*w), v;
+                for (v = 0; v < 4; v++) {
+                    size_t m = n;
+                    strcpy(word, *w);
+                    if (v == 1)
+                        word[m++] = 'x';
+                    else if (v == 2)
+                        m--;
+                    else if (v == 3)
+                        word[0] = word[0] == 'q' ? 'z' : 'q';
+                    if (m == 0 || !syn->wordc[(unsigned char)word[0]] ||
+                        (word[0] >= '0' && word[0] <= '9'))
+                        continue;
+                    syn_lex(syn, 0, word, m, cls);
+                    if (cls[0] != ref_word_class(syn, word, m)) {
+                        printf("FAIL %s: \"%.*s\" is %d, want %d\n", syn->name, (int)m,
+                               word, cls[0], ref_word_class(syn, word, m));
+                        failures++;
+                    }
+                }
+            }
+        }
+    }
+}
+
 int main(void)
 {
     test_lexer();
     test_detect();
     test_cache();
     test_far();
+    test_words();
+    test_states();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

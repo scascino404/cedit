@@ -231,10 +231,11 @@ still open at a line's end into the next. Its state at the start of every
 screen only needs lexing from the nearest cached state.
 
 On huge files the lexer runs in the background like the indexing (about
-280 MB/s). Until it reaches a line far from the start, such as the end of a
-1 GB file right after opening it, that part is lexed from a few hundred lines
-up as if nothing were open there. It's recolored once the background pass
-catches up.
+400 to 950 MB/s, depending on the language), a few milliseconds a frame so
+that typing never waits for it. Until it reaches a line far from the start,
+such as the end of a 1 GB file right after opening it, that part is lexed
+from a few hundred lines up as if nothing were open there. It's recolored
+once the background pass catches up.
 
 ### Themes
 

@@ -4,6 +4,7 @@
  */
 #define _XOPEN_SOURCE 700
 #include "../src/editor.h"
+#include "../src/utf8.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,6 +54,96 @@ static void type(Editor *ed, const char *s, unsigned long *t)
         ed_type(ed, s, 1, *t);
         *t += 50;
         s++;
+    }
+}
+
+/* The display column of byte col, a character at a time. */
+static long ref_disp_col(int tabw, const char *s, size_t len, size_t col)
+{
+    size_t i = 0;
+    long d = 0;
+    while (i < col && i < len) {
+        d = s[i] == '\t' ? (d / tabw + 1) * tabw : d + 1;
+        i = s[i] == '\t' ? i + 1 : utf8_next(s, len, i);
+    }
+    return d;
+}
+
+/* Columns of long lines (counted in blocks) with tabs, UTF-8 and bad
+ * bytes here and there. */
+static void test_columns(Editor *ed)
+{
+    static const char *const parts[] = {"a", "a", "a", "a", "a", "a", "\t",
+                                        "\xc3\xa9", "\xe2\x86\xb5", "\xff", " "};
+    char s[700];
+    unsigned long r = 1;
+    int k;
+
+    for (k = 0; k < 300; k++) {
+        size_t len = 0, col;
+        long dcol, total;
+        int rare = k % 3 == 0 ? 2 : 40;     /* how often not "a" */
+        while (len < sizeof s - 8) {
+            const char *p;
+            r = r * 1103515245UL + 12345UL;
+            p = (r >> 16) % rare ? "a" : parts[(r >> 8) % 11];
+            memcpy(s + len, p, strlen(p));
+            len += strlen(p);
+        }
+        len -= (r >> 4) % 100;
+        for (col = 0; col <= len + 1; col++)
+            if (ed_disp_col(ed, s, len, col) != ref_disp_col(ed->opt->tabw, s, len, col)) {
+                printf("FAIL line %d: disp_col %lu\n", __LINE__, (unsigned long)col);
+                failures++;
+                return;
+            }
+        total = ref_disp_col(ed->opt->tabw, s, len, len);
+        for (dcol = -1; dcol <= total + 1; dcol++) {
+            size_t i = ed_byte_col(ed, s, len, dcol), j = 0;
+            /* the first character that doesn't end by dcol */
+            while (j < len && ref_disp_col(ed->opt->tabw, s, len, utf8_next(s, len, j)) <= dcol)
+                j = utf8_next(s, len, j);
+            if (i != j) {
+                printf("FAIL line %d: byte_col %ld: %lu, want %lu\n", __LINE__, dcol,
+                       (unsigned long)i, (unsigned long)j);
+                failures++;
+                return;
+            }
+        }
+    }
+}
+
+/* The rows the view uses for line ln (remembered) are the ones found
+ * from its text, and so is the cursor's row. */
+static void check_rows(Editor *ed, long ln, int line)
+{
+    size_t len, start, col;
+    const char *l;
+    long r, x, row;
+
+    for (r = 0; r < 300; r++) {
+        size_t got = ed_line_row_start(ed, ln, r);
+        l = ed_line(ed, ln, &len);
+        if (got != ed_row_start(ed, l, len, r)) {
+            printf("FAIL line %d: row %ld starts at %lu, want %lu\n", line, r,
+                   (unsigned long)got, (unsigned long)ed_row_start(ed, l, len, r));
+            failures++;
+            return;
+        }
+    }
+    l = ed_line(ed, ln, &len);
+    for (col = 0; col <= len; col += 7) {
+        ed->top = ln;
+        ed->top_row = 0;
+        ed_set_cursor(ed, ln, col, 0);
+        ed_cursor_spot(ed, &row, &x);
+        l = ed_line(ed, ln, &len);
+        if (row != ed_row_of(ed, l, len, ed->cx, &start)) {
+            printf("FAIL line %d: cursor at %lu in row %ld\n", line,
+                   (unsigned long)col, row);
+            failures++;
+            return;
+        }
     }
 }
 
@@ -250,6 +341,41 @@ int main(void)
         CHECK(ln == 0 && start == 4);
         ed_pos_at(&ed, 1, 1, &ln, &start);
         CHECK(ln == 0 && start == 6);
+    }
+
+    test_columns(&ed);
+
+    /* the rows of a long line are remembered, and follow edits, the wrap
+     * width, the tab width and the document shown */
+    {
+        char text[6000];
+        unsigned long t2 = 0;
+        size_t i;
+        for (i = 0; i + 1 < sizeof text; i++)
+            text[i] = i % 13 == 12 ? ' ' : i % 97 == 0 ? '\t' : (char)('a' + i % 26);
+        text[i] = 0;
+        open_text(&ed, text);
+        ed.view_w = 41;
+        ed.view_h = 4;
+        check_rows(&ed, 0, __LINE__);
+        ed_set_cursor(&ed, 0, 100, 0);
+        type(&ed, "  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", &t2);
+        check_rows(&ed, 0, __LINE__);
+        ed.view_w = 30;
+        check_rows(&ed, 0, __LINE__);
+        opt.tabw = 8;
+        check_rows(&ed, 0, __LINE__);
+        opt.tabw = 4;
+        for (i = 0; i + 1 < sizeof text; i++)
+            text[i] = i % 7 == 6 ? ' ' : 'q';
+        open_text(&ed, text);
+        check_rows(&ed, 0, __LINE__);
+        for (i = 0; i + 1 < sizeof text; i++)   /* same size: same generation */
+            text[i] = i % 5 == 4 ? ' ' : 'r';
+        open_text(&ed, text);
+        check_rows(&ed, 0, __LINE__);
+        opt.wrap = 0;
+        check_rows(&ed, 0, __LINE__);
     }
     opt.wrap = 0;
     ed.view_w = 80;

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 
 static int failures;
@@ -241,9 +242,9 @@ static void test_load(void)
     }
     verify(b, "load");
 
-    CHECK(buf_find(b, 0, "HELLO", 5, 0, 0) == 5, "test", "find");
-    CHECK(buf_find(b, 0, "hello", 5, 1, 0) == 5, "test", "find icase");
-    CHECK(buf_find(b, buf_size(b), "HELLO", 5, 0, 1) == 5, "test", "find backward");
+    CHECK(buf_find(b, 0, (size_t)-1, "HELLO", 5, 0, 0) == 5, "test", "find");
+    CHECK(buf_find(b, 0, (size_t)-1, "hello", 5, 1, 0) == 5, "test", "find icase");
+    CHECK(buf_find(b, buf_size(b), 0, "HELLO", 5, 0, 1) == 5, "test", "find backward");
 
     CHECK(buf_save(b, path, err, sizeof err) == 0, err, "save: ?");
     buf_free(b);
@@ -280,6 +281,58 @@ static void test_crlf(void)
     unlink(path);
 }
 
+/* The match buf_find should give, from the reference. */
+static size_t ref_find(size_t from, size_t to, const char *pat, size_t plen,
+                       int icase, int backward)
+{
+    size_t i, k, none = (size_t)-1;
+    if (ref_len < plen)
+        return none;
+    for (k = 0; k <= ref_len - plen; k++) {
+        i = backward ? ref_len - plen - k : k;
+        if (backward ? i > from || i < to : i < from || i >= to)
+            continue;
+        if (icase ? strncasecmp(ref + i, pat, plen) == 0
+                  : memcmp(ref + i, pat, plen) == 0)
+            return i;
+    }
+    return none;
+}
+
+/* Searches in both directions, with and without case, in ranges, over
+ * many leaves of short lines of a few letters (lots of near misses). */
+static void test_find(void)
+{
+    static const char *const pats[] = {"ab", "Ab", "aB", "bca", "a", "B",
+                                       "abcab", "cc", "1a"};
+    Buffer *b = buf_new();
+    char *t, msg[128];
+    size_t n = 200000, i;
+    int k;
+
+    ref_len = 0;
+    t = (char *)malloc(n);
+    for (i = 0; i < n; i++)
+        t[i] = rnd() % 12 == 0 ? '\n' : "abcABC1"[rnd() % 7];
+    buf_insert(b, 0, t, n);
+    ref_insert(0, t, n);
+    free(t);
+    for (k = 0; k < 3000; k++) {
+        const char *pat = pats[rnd() % (sizeof pats / sizeof pats[0])];
+        size_t from = rnd() % (n + 1), to = rnd() % 4 ? rnd() % (n + 1) : (size_t)-1;
+        int icase = rnd() % 2, back = rnd() % 2;
+        size_t got, want;
+        if (back && to == (size_t)-1)
+            to = 0;
+        got = buf_find(b, from, to, pat, strlen(pat), icase, back);
+        want = ref_find(from, to, pat, strlen(pat), icase, back);
+        sprintf(msg, "\"%s\" from %lu to %ld icase %d back %d: %ld, want %ld", pat,
+                (unsigned long)from, (long)to, icase, back, (long)got, (long)want);
+        CHECK(got == want, "find", msg);
+    }
+    buf_free(b);
+}
+
 int main(void)
 {
     test_random_edits(3000, 200, 10);
@@ -289,6 +342,7 @@ int main(void)
     test_undo();
     test_load();
     test_crlf();
+    test_find();
     if (failures) {
         printf("%d FAILURES\n", failures);
         return 1;

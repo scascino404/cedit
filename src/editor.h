@@ -15,6 +15,18 @@ enum {
 
 typedef struct Editor Editor;
 
+#define ED_ROWS 4           /* lines whose rows a view remembers */
+
+/* Where the rows of a line start with word wrap, for the buffer generation,
+ * wrap width and tab width they were found with (see editor.c, find_rows). */
+typedef struct WrapRows {
+    long ln;
+    unsigned long gen;      /* 0: unused */
+    int w, tabw;
+    size_t *start;
+    long n, cap;
+} WrapRows;
+
 /* Settings and search text shared by all the views. */
 typedef struct EdOptions {
     int overwrite;
@@ -68,6 +80,11 @@ struct Editor {
 
     /* while another view edits: cursor, anchor and top line as offsets */
     size_t o_cur, o_anc, o_top;
+
+    /* the rows of the lines asked about last: [0] for short lines, the
+     * others for long ones, which are slow to break into rows */
+    WrapRows rows[ED_ROWS];
+    int rows_next;
 };
 
 void ed_options_init(EdOptions *opt);
@@ -110,6 +127,8 @@ size_t ed_row_start(const Editor *ed, const char *s, size_t len, long row);
 /* The row that byte col shows in, and that row's start. A position at a
  * row's end shows at the start of the next one. */
 long ed_row_of(const Editor *ed, const char *s, size_t len, size_t col, size_t *start);
+/* ed_row_start for line ln of the document, remembering the line's rows. */
+size_t ed_line_row_start(Editor *ed, long ln, long row);
 /* The cursor's place in the text area: its row from the top and display
  * column from the left. A cursor line above or below the view gives a row
  * of -1 or view_h. */

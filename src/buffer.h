@@ -64,10 +64,11 @@ void buf_delete(Buffer *b, size_t off, size_t n);
 /* Copies n bytes at off into dst. */
 void buf_copy(Buffer *b, size_t off, size_t n, char *dst);
 
-/* Finds pat (no newlines) starting at or after from (forward) or ending at or
- * before from (backward). Returns the match offset or (size_t)-1. */
-size_t buf_find(Buffer *b, size_t from, const char *pat, size_t plen,
-                int icase, int backward);
+/* Finds pat (no newlines): forward, the first match starting in
+ * [from, to); backward, the last one starting in [to, from]. Returns the
+ * match offset or (size_t)-1. */
+size_t buf_find(Buffer *b, size_t from, size_t to, const char *pat,
+                size_t plen, int icase, int backward);
 
 int buf_save(Buffer *b, const char *path, char *err, size_t errlen);
 

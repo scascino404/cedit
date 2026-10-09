@@ -46,6 +46,8 @@ typedef struct App {
     int click_count, click_x, click_y;
 
     int highlight;          /* syntax highlighting is on */
+    int input;              /* input came since the last tick: its frame
+                               does little background work */
 
     int show_lnum;
     int dark;

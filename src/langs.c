@@ -248,7 +248,8 @@ static const Rule md_rules[] = {
 /* ------------------------------------------------------------------- */
 
 #define LANG(name, files, interp, word, esc, flags, rules) \
-    {name, files, interp, word, esc, flags, rules, NELEM(rules), NULL, 0, {0}, {0}}
+    {name, files, interp, word, esc, flags, rules, NELEM(rules), NULL, 0, {0}, {0}, \
+     {0}, {0}, {0}, 0}
 
 Syntax syn_langs[] = {
     LANG("C", ".c .h", NULL, NULL, 0, SYN_NUMBERS | SYN_DIGITSEP, c_rules),

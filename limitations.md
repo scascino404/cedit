@@ -87,10 +87,10 @@ editor. The most noticeable gaps come first; the rest are grouped by area.
   Large 8×8 tripled). There are no other fonts and no fractional sizes.
 - Two color themes (light and dark) on the fixed 16-color VGA palette. Colors
   can't be customized.
-- Very long single lines (tens of MB with no newline) get slow to edit near
-  their start, and the screen has to scan from the line start to the visible
-  column. With word wrap, scrolling through such a line rewraps it from its
-  start at each row.
+- Very long single lines (tens of MB with no newline) get slow to edit: each
+  edit lexes the whole line again for highlighting and, with word wrap,
+  breaks it into rows again, and the screen scans from the line start to
+  the visible column.
 - Word wrap breaks only at spaces and tabs (or anywhere in a word too long
   for a row), with no hyphenation and no indent for the continued rows.
   `Home` and `End` go to the line's ends, not the row's, and the scrollbar

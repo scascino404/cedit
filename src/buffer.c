@@ -12,6 +12,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 #define FANOUT      64
@@ -324,13 +325,15 @@ static Node *find_leaf(Buffer *b, long ln, size_t off, long *line0,
     return n;
 }
 
-/* Makes a leaf's text owned and able to hold extra more bytes. */
+/* Makes a leaf's text owned and able to hold extra more bytes. A borrowed
+ * leaf gets a little room for typing (edits scattered over a big file
+ * each own a leaf); an owned one that fills up grows by half. */
 static void leaf_own(Node *l, size_t extra)
 {
     if (l->cap == 0 || l->bytes + extra > l->cap) {
         size_t cap = l->bytes + extra;
         char *t;
-        cap += cap / 2 + 64;
+        cap += l->cap ? cap / 2 + 64 : 256;
         t = (char *)xmalloc(cap);
         if (l->bytes)
             memcpy(t, l->text, l->bytes);
@@ -493,7 +496,8 @@ int buf_load_step(Buffer *b, size_t budget)
         done += end - start;
         b->load_pos = end;
     }
-    b->gen++;
+    if (done)
+        b->gen++;
     return buf_loading(b);
 }
 
@@ -678,20 +682,18 @@ size_t buf_line_offset(Buffer *b, long ln)
 void buf_offset_to_pos(Buffer *b, size_t off, long *ln, size_t *col)
 {
     long l0;
-    size_t o0, rel, i, start = 0;
-    long n = 0;
+    size_t o0, rel, start;
+    long n;
     Node *leaf;
 
     if (off > b->root->bytes)
         off = b->root->bytes;
     leaf = find_leaf(b, -1, off, &l0, &o0);
     rel = off - o0;
-    for (i = 0; i < rel; i++) {
-        if (leaf->text[i] == '\n') {
-            n++;
-            start = i + 1;
-        }
-    }
+    n = count_nl(leaf->text, rel);
+    /* the line starts after the last '\n' before off, if there is one */
+    for (start = n ? rel : 0; start && leaf->text[start - 1] != '\n'; start--)
+        ;
     *ln = l0 + n;
     *col = rel - start;
 }
@@ -717,7 +719,12 @@ void buf_insert(Buffer *b, size_t off, const char *s, size_t n)
     leaf = find_leaf(b, -1, off, &l0, &o0);
     mark_dirty(b, l0);
     rel = off - o0;
-    if (leaf->bytes + n <= LEAF_MAX) {
+    /* in place while it fits, or while it couldn't be split anyway: one
+     * long line, and no line break inserted into it */
+    if (leaf->bytes + n <= LEAF_MAX ||
+        ((leaf->newlines == 0 ||
+          (leaf->newlines == 1 && leaf->text[leaf->bytes - 1] == '\n')) &&
+         !memchr(s, '\n', n))) {
         leaf_own(leaf, n);
         memmove(leaf->text + rel + n, leaf->text + rel, leaf->bytes - rel);
         memcpy(leaf->text + rel, s, n);
@@ -814,51 +821,61 @@ void buf_copy(Buffer *b, size_t off, size_t n, char *dst)
     }
 }
 
-/* First match in s[0..n), or -1. */
+static int lower(int c)
+{
+    return c >= 'A' && c <= 'Z' ? c + 32 : c;
+}
+
+/* First match in s[0..n), or -1. The candidates are found with memchr: for
+ * a letter ignoring case, the nearer of the next lowercase and the next
+ * uppercase one. */
 static long search_fwd(const char *s, size_t n, const char *pat, size_t plen,
                        int icase)
 {
-    size_t i = 0;
-    int c0 = (unsigned char)pat[0];
-    int letter = (c0 | 32) >= 'a' && (c0 | 32) <= 'z';
+    const char *end, *p, *q, *c;
+    int lo = (unsigned char)pat[0], up = lo;
 
     if (n < plen)
         return -1;
-    if (!icase || !letter) {
-        while (i + plen <= n) {
-            const char *p = (const char *)memchr(s + i, c0, n - plen + 1 - i);
-            if (!p)
-                return -1;
-            i = (size_t)(p - s);
-            if (mem_match(s + i, pat, plen, icase))
-                return (long)i;
-            i++;
-        }
-        return -1;
+    if (icase) {
+        lo = lower(lo);
+        up = lo >= 'a' && lo <= 'z' ? lo - 32 : lo;
     }
-    c0 = ascii_lower(c0);
-    for (; i + plen <= n; i++)
-        if (ascii_lower((unsigned char)s[i]) == c0 &&
-            mem_match(s + i, pat, plen, 1))
-            return (long)i;
+    end = s + n - plen + 1;             /* matches start before this */
+    p = (const char *)memchr(s, lo, (size_t)(end - s));
+    q = up != lo ? (const char *)memchr(s, up, (size_t)(end - s)) : NULL;
+    while (p || q) {
+        c = p && (!q || p < q) ? p : q;
+        if (mem_match(c, pat, plen, icase))
+            return (long)(c - s);
+        if (c == p)
+            p = (const char *)memchr(p + 1, lo, (size_t)(end - p - 1));
+        else
+            q = (const char *)memchr(q + 1, up, (size_t)(end - q - 1));
+    }
     return -1;
 }
 
-/* Last match starting in s[0..n - plen], or -1. */
-static long search_bwd(const char *s, size_t n, const char *pat, size_t plen,
-                       int icase)
+/* Last match starting in s[lo..n - plen], or -1. */
+static long search_bwd(const char *s, size_t n, size_t lo, const char *pat,
+                       size_t plen, int icase)
 {
     size_t i;
+    int c0 = (unsigned char)pat[0], l0 = lower(c0);
+
     if (n < plen)
         return -1;
-    for (i = n - plen + 1; i > 0; i--)
-        if (mem_match(s + i - 1, pat, plen, icase))
+    for (i = n - plen + 1; i > lo; i--) {
+        int c = (unsigned char)s[i - 1];
+        if ((c == c0 || (icase && lower(c) == l0)) &&
+            mem_match(s + i - 1, pat, plen, icase))
             return (long)(i - 1);
+    }
     return -1;
 }
 
-size_t buf_find(Buffer *b, size_t from, const char *pat, size_t plen,
-                int icase, int backward)
+size_t buf_find(Buffer *b, size_t from, size_t to, const char *pat,
+                size_t plen, int icase, int backward)
 {
     long l0;
     size_t o0, rel;
@@ -873,9 +890,12 @@ size_t buf_find(Buffer *b, size_t from, const char *pat, size_t plen,
     leaf = find_leaf(b, -1, from, &l0, &o0);
     rel = from - o0;
     if (!backward) {
-        while (leaf) {
-            r = search_fwd(leaf->text + rel, leaf->bytes - rel, pat, plen,
-                           icase);
+        /* a match can't span leaves: all but the last end in '\n' */
+        while (leaf && o0 + rel < to) {
+            size_t n = leaf->bytes - rel, room = to - (o0 + rel);
+            if (room < n && room + plen - 1 < n)
+                n = room + plen - 1;
+            r = search_fwd(leaf->text + rel, n, pat, plen, icase);
             if (r >= 0)
                 return o0 + rel + (size_t)r;
             o0 += leaf->bytes;
@@ -886,10 +906,13 @@ size_t buf_find(Buffer *b, size_t from, const char *pat, size_t plen,
         size_t lim = rel + plen;
         if (lim > leaf->bytes)
             lim = leaf->bytes;
-        while (leaf) {
-            r = search_bwd(leaf->text, lim, pat, plen, icase);
+        while (leaf && o0 + lim >= to) {
+            r = search_bwd(leaf->text, lim, to > o0 ? to - o0 : 0, pat, plen,
+                           icase);
             if (r >= 0)
                 return o0 + (size_t)r;
+            if (o0 <= to)
+                break;
             leaf = leaf_prev(leaf);
             if (leaf) {
                 o0 -= leaf->bytes;
@@ -900,20 +923,31 @@ size_t buf_find(Buffer *b, size_t from, const char *pat, size_t plen,
     return (size_t)-1;
 }
 
+/* Writes the leaves, many to a system call. */
 static int write_all(int fd, Buffer *b)
 {
+    struct iovec iov[256];
     Node *leaf = first_leaf(b->root);
-    for (; leaf; leaf = leaf_next(leaf)) {
-        const char *p = leaf->text;
-        size_t n = leaf->bytes;
-        while (n) {
-            ssize_t w = write(fd, p, n);
+    int n, k;
+
+    while (leaf) {
+        for (n = 0; leaf && n < 256; leaf = leaf_next(leaf))
+            if (leaf->bytes) {
+                iov[n].iov_base = leaf->text;
+                iov[n++].iov_len = leaf->bytes;
+            }
+        for (k = 0; k < n;) {
+            ssize_t w = writev(fd, iov + k, n - k);
             if (w < 0 && errno == EINTR)
                 continue;
             if (w < 0)
                 return -1;
-            p += w;
-            n -= (size_t)w;
+            for (; k < n && (size_t)w >= iov[k].iov_len; k++)
+                w -= (ssize_t)iov[k].iov_len;
+            if (k < n) {
+                iov[k].iov_base = (char *)iov[k].iov_base + w;
+                iov[k].iov_len -= (size_t)w;
+            }
         }
     }
     return 0;
