@@ -82,6 +82,23 @@ void screen_fill(Screen *s, int x, int y, int w, int h, unsigned long ch,
 void screen_frame(Screen *s, int x, int y, int w, int h, int dbl, int fg, int bg);
 void screen_cursor(Screen *s, int x, int y, int shape);
 
+/*
+ * A scrollbar down a column h cells tall, for a view of h rows from row top
+ * of total: arrows at both ends, and between them a track with a thumb.
+ */
+typedef struct Scrollbar {
+    int h;
+    int track;              /* cells between the arrows */
+    int pos, len;           /* the thumb's place and length in the track */
+} Scrollbar;
+
+Scrollbar scrollbar_make(long total, long top, int h);
+void screen_scrollbar(Screen *s, int x, int y, const Scrollbar *sb, int fg,
+                      int bg);
+/* Rows a click on cell r of the scrollbar scrolls by: a row on an arrow, a
+ * screenful (h - 1 rows) on the track, and 0 on the thumb. */
+int scrollbar_step(const Scrollbar *sb, int r);
+
 /* Labels mark their hotkey letter with '&', as in "&Open". screen_label
  * draws one with the hotkey in color hot and returns its width. */
 int screen_label(Screen *s, int x, int y, const char *label, int fg, int hot,

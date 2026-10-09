@@ -22,17 +22,21 @@ typedef struct Font {
 /* The pixel at column x of a glyph row; fonts are at most 32 px wide. */
 #define FONT_BIT(x) (0x80000000UL >> (x))
 
+/* The fonts of the text sizes, built by font_init. */
 extern Font font_8x8;
 extern Font font_12x12;
-extern Font font_20x20;
 
 /* Source tables: "@XXXX" starts the glyph for codepoint XXXX (hex), followed
- * by h rows of '.' and '#'. NULL terminated. */
+ * by h rows of '.' and '#'. NULL terminated. No text size uses the 20x20
+ * font; tests/fontsheet.c builds it for review. */
 extern const char *const font8x8_src[];
 extern const char *const font12x12_src[];
 extern const char *const font20x20_src[];
 
 void font_init(void);
+/* Builds a w x h font from a source table; name is for error messages. */
+void font_build(Font *f, int w, int h, const char *const *src,
+                const char *name);
 int font_has(const Font *f, unsigned long cp);
 const unsigned long *font_glyph(const Font *f, unsigned long cp);
 

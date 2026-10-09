@@ -252,8 +252,8 @@ static int word_class(const Syntax *syn, const char *s, size_t n)
     return HL_NORMAL;
 }
 
-unsigned syn_lex_rules(const Syntax *syn, unsigned state, const char *s,
-                       size_t len, unsigned char *cls)
+unsigned syn_lex(const Syntax *syn, unsigned state, const char *s, size_t len,
+                 unsigned char *cls)
 {
     size_t i = 0, bol = 0, j;
 
@@ -300,13 +300,6 @@ unsigned syn_lex_rules(const Syntax *syn, unsigned state, const char *s,
         }
     }
     return state;
-}
-
-unsigned syn_lex(const Syntax *syn, unsigned state, const char *s, size_t len,
-                 unsigned char *cls)
-{
-    return syn->lex ? syn->lex(syn, state, s, len, cls)
-                    : syn_lex_rules(syn, state, s, len, cls);
 }
 
 void syn_prepare(Syntax *syn)

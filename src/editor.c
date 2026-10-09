@@ -629,32 +629,19 @@ void ed_move(Editor *ed, int how, int extend)
 
     switch (how) {
     case MV_LEFT:
+    case MV_WORDLEFT:
         if (ed->cx > 0)
-            ed->cx = utf8_prev(l, ed->cx);
+            ed->cx = how == MV_LEFT ? utf8_prev(l, ed->cx) : word_left(l, ed->cx);
         else if (ed->cy > 0) {
             ed->cy--;
             ed->cx = line_len(ed, ed->cy);
         }
         break;
     case MV_RIGHT:
-        if (ed->cx < len)
-            ed->cx = utf8_next(l, len, ed->cx);
-        else if (ed->cy < n - 1) {
-            ed->cy++;
-            ed->cx = 0;
-        }
-        break;
-    case MV_WORDLEFT:
-        if (ed->cx > 0)
-            ed->cx = word_left(l, ed->cx);
-        else if (ed->cy > 0) {
-            ed->cy--;
-            ed->cx = line_len(ed, ed->cy);
-        }
-        break;
     case MV_WORDRIGHT:
         if (ed->cx < len)
-            ed->cx = word_right(l, len, ed->cx);
+            ed->cx = how == MV_RIGHT ? utf8_next(l, len, ed->cx)
+                                     : word_right(l, len, ed->cx);
         else if (ed->cy < n - 1) {
             ed->cy++;
             ed->cx = 0;
@@ -1260,10 +1247,10 @@ void ed_find_begin(Editor *ed, EdSearch *s, int backward)
     s->icase = ed->opt->icase;
     s->backward = backward;
     /* forward from the end of the selection, backward from its start */
-    if (!backward)
-        s->start = have ? pos_off(ed, ey, ex) : cur_off(ed);
+    if (!have)
+        s->start = cur_off(ed);
     else
-        s->start = have ? pos_off(ed, sy, sx) : cur_off(ed);
+        s->start = backward ? pos_off(ed, sy, sx) : pos_off(ed, ey, ex);
     s->pos = s->start;
     s->pass = s->plen ? 0 : 2;
 }

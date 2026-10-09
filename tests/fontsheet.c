@@ -37,10 +37,12 @@ static const char *const sample[] = {
     NULL
 };
 
+static Font font_20x20;
+
 int main(int argc, char **argv)
 {
     const Font *f;
-    int scale, cols = 72, rows, W, H, i, r;
+    int scale, cols = 72, rows, W, H, r;
     unsigned char *img;
     FILE *fp;
 
@@ -49,6 +51,7 @@ int main(int argc, char **argv)
         return 1;
     }
     font_init();
+    font_build(&font_20x20, 20, 20, font20x20_src, "font20x20");
     f = atoi(argv[1]) == 20 ? &font_20x20
       : atoi(argv[1]) == 12 ? &font_12x12 : &font_8x8;
     scale = atoi(argv[2]);
@@ -89,9 +92,13 @@ int main(int argc, char **argv)
         }
     }
     fp = fopen(argv[3], "wb");
+    if (!fp) {
+        perror(argv[3]);
+        return 1;
+    }
     fprintf(fp, "P6\n%d %d\n255\n", W, H);
     fwrite(img, 1, (size_t)W * H * 3, fp);
     fclose(fp);
-    (void)i;
+    free(img);
     return 0;
 }

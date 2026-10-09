@@ -9,7 +9,6 @@
 
 Font font_8x8;
 Font font_12x12;
-Font font_20x20;
 
 #define MAX_GLYPHS 512
 
@@ -223,13 +222,13 @@ static void make_blocks(Font *f)
     }
 }
 
-/* Accented letters: base | accent. Lowercase accents sit lower in tall
- * fonts; capitals use squashed letters when the font provides them. */
-static void make_accented(Font *f, int lower_shift)
+/* Accented letters: base | accent. Capitals use squashed letters when the
+ * font provides them. */
+static void make_accented(Font *f)
 {
     size_t i;
     for (i = 0; i < sizeof compose / sizeof compose[0]; i++) {
-        int base = -1, acc, y, shift, g;
+        int base = -1, acc, y, g;
         unsigned long b = compose[i].base;
         const char *sc = b < 128 ? strchr(small_caps_order, (int)b) : NULL;
         int upper = b >= 'A' && b <= 'Z';
@@ -242,16 +241,13 @@ static void make_accented(Font *f, int lower_shift)
         if (base < 0 || acc < 0)
             continue;
         g = add_glyph(f, compose[i].cp);
-        shift = upper || compose[i].accent == ACC_CEDIL ? 0 : lower_shift;
-        for (y = 0; y < f->h; y++) {
-            unsigned long a = y - shift >= 0 ? glyph_ptr(f, acc)[y - shift] : 0;
-            glyph_ptr(f, g)[y] = glyph_ptr(f, base)[y] | a;
-        }
+        for (y = 0; y < f->h; y++)
+            glyph_ptr(f, g)[y] = glyph_ptr(f, base)[y] | glyph_ptr(f, acc)[y];
     }
 }
 
-static void build(Font *f, int w, int h, const char *const *src,
-                  const char *name, int lower_shift)
+void font_build(Font *f, int w, int h, const char *const *src,
+                const char *name)
 {
     size_t i;
 
@@ -266,7 +262,7 @@ static void build(Font *f, int w, int h, const char *const *src,
         make_box(f, boxes[i].cp, boxes[i].up, boxes[i].down, boxes[i].left,
                  boxes[i].right);
     make_blocks(f);
-    make_accented(f, lower_shift);
+    make_accented(f);
     if (f->map[0xAD] < 0 && f->map['-'] >= 0) {     /* soft hyphen */
         int g = add_glyph(f, 0xAD);
         memcpy(glyph_ptr(f, g), glyph_ptr(f, f->map['-']), (size_t)h * sizeof *f->bits);
@@ -279,9 +275,8 @@ static void build(Font *f, int w, int h, const char *const *src,
 
 void font_init(void)
 {
-    build(&font_8x8, 8, 8, font8x8_src, "font8x8", 0);
-    build(&font_12x12, 12, 12, font12x12_src, "font12x12", 0);
-    build(&font_20x20, 20, 20, font20x20_src, "font20x20", 0);
+    font_build(&font_8x8, 8, 8, font8x8_src, "font8x8");
+    font_build(&font_12x12, 12, 12, font12x12_src, "font12x12");
 }
 
 int font_has(const Font *f, unsigned long cp)

@@ -9,16 +9,15 @@
 #define _XOPEN_SOURCE 700
 #include "ui.h"
 #include "config.h"
+#include "path.h"
 #include "utf8.h"
 #include "util.h"
 
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <unistd.h>
 
 #define BLINK_MS   300
 #define MSG_MS     4000
@@ -207,29 +206,7 @@ static void cursor_cell(App *a, int *cx, int *cy)
  * for an untitled buffer. */
 static void current_dir(App *a)
 {
-    const char *path = a->win->ed.doc->path;
-    if (path) {
-        char *rp = realpath(path, NULL), *slash;
-        str_copy(a->dir, sizeof a->dir, rp ? rp : path);
-        free(rp);
-        slash = strrchr(a->dir, '/');
-        if (slash && slash != a->dir)
-            *slash = 0;
-        else if (slash)
-            slash[1] = 0;
-        else if (!getcwd(a->dir, sizeof a->dir))
-            str_copy(a->dir, sizeof a->dir, ".");
-    } else if (!getcwd(a->dir, sizeof a->dir)) {
-        str_copy(a->dir, sizeof a->dir, ".");
-    }
-}
-
-/* Loads the rest of a file that is still being indexed. */
-static void finish_loading(App *a)
-{
-    Buffer *b = a->win->ed.doc->buf;
-    if (buf_loading(b))
-        buf_load_all(b);
+    path_dir(a->dir, sizeof a->dir, a->win->ed.doc->path);
 }
 
 /* The performance counter ms milliseconds from now, and whether it is
@@ -244,6 +221,8 @@ static int before(Uint64 t)
     return SDL_GetPerformanceCounter() < t;
 }
 
+static const char replace_running[] = "Replace All is running (Esc stops it)";
+
 /* Why the focused window's document can't change now, or NULL. */
 static const char *edit_blocked(App *a)
 {
@@ -251,7 +230,7 @@ static const char *edit_blocked(App *a)
     if (a->save && a->save_doc == d)
         return "Saving: no changes until the file is saved";
     if (a->job == J_REPLACE && a->job_win->ed.doc == d)
-        return "Replace All is running (Esc stops it)";
+        return replace_running;
     return NULL;
 }
 
@@ -312,7 +291,7 @@ static void stop_job(App *a, int say)
 static int start_job(App *a, int kind)
 {
     if (a->job == J_REPLACE) {
-        set_msg(a, "Replace All is running (Esc stops it)", NULL);
+        set_msg(a, replace_running, NULL);
         return 0;
     }
     a->job = kind;
@@ -342,6 +321,26 @@ static void show_found(App *a, int r)
     ed_cursor_spot(ed, &row, &x);
     if (row > h / 2)
         ed_scroll_cursor_to(ed, h / 3);
+}
+
+/* Moves to a line (J_GOTO), to the end (J_DOCEND) or selects all
+ * (J_SELALL), which need the file loaded that far. */
+static void move_to(Editor *ed, int kind, long line, int extend)
+{
+    if (kind == J_GOTO)
+        ed_goto(ed, line);
+    else if (kind == J_DOCEND)
+        ed_move(ed, MV_DOCEND, extend);
+    else
+        ed_select_all(ed);
+}
+
+/* Whether the move the job does waits for more of the file to load. */
+static int move_waits(App *a)
+{
+    Editor *ed = &a->job_win->ed;
+    return buf_loading(ed->doc->buf) &&
+           (a->job != J_GOTO || ed_lines(ed) <= a->job_line);
 }
 
 /* Works on the job until it is done or the time is up. */
@@ -382,25 +381,19 @@ static void job_steps(App *a, Uint64 end)
         }
         break;
     default:
-        /* a move to a line, or to the end, once it is loaded */
-        while (buf_loading(b) && (a->job != J_GOTO || ed_lines(ed) <= a->job_line) &&
-               before(end))
+        /* a move, once the file is loaded far enough */
+        while (move_waits(a) && before(end))
             buf_load_step(b, LOAD_SLICE);
-        if (buf_loading(b) && (a->job != J_GOTO || ed_lines(ed) <= a->job_line))
+        if (move_waits(a))
             break;
         r = a->job;
         a->job = J_NONE;
-        if (r == J_GOTO)
-            ed_goto(ed, a->job_line);
-        else if (r == J_DOCEND)
-            ed_move(ed, MV_DOCEND, a->job_extend);
-        else
-            ed_select_all(ed);
+        move_to(ed, r, a->job_line, a->job_extend);
     }
 }
 
-/* Does a move that needs the file loaded up to a line (J_GOTO) or to its
- * end: now if it is, or else as a job, once it is. */
+/* Does a move_to now if the file is loaded, or else as a job, once it
+ * is loaded far enough. */
 static void move_loaded(App *a, int kind, long line, int extend)
 {
     Editor *ed = &a->win->ed;
@@ -410,13 +403,8 @@ static void move_loaded(App *a, int kind, long line, int extend)
         job_steps(a, deadline(WORK_MS));
         return;
     }
-    finish_loading(a);          /* loading only while Replace All runs */
-    if (kind == J_GOTO)
-        ed_goto(ed, line);
-    else if (kind == J_DOCEND)
-        ed_move(ed, MV_DOCEND, extend);
-    else
-        ed_select_all(ed);
+    buf_load_all(ed->doc->buf);     /* loading only while Replace All runs */
+    move_to(ed, kind, line, extend);
 }
 
 /* ------------------------------------------------------------------ */
@@ -429,62 +417,26 @@ static void close_dialog(App *a)
     wake_cursor(a);
 }
 
-/* Directories first, "../" on top, then case-insensitive by name. */
-static int cmp_items(const void *pa, const void *pb)
-{
-    const char *x = *(const char *const *)pa, *y = *(const char *const *)pb;
-    size_t lx = strlen(x), ly = strlen(y);
-    int dx = x[lx - 1] == '/', dy = y[ly - 1] == '/';
-    if (strcmp(x, "../") == 0)
-        return -1;
-    if (strcmp(y, "../") == 0)
-        return 1;
-    if (dx != dy)
-        return dy - dx;
-    for (; *x && *y; x++, y++) {
-        int c = ascii_lower((unsigned char)*x) - ascii_lower((unsigned char)*y);
-        if (c)
-            return c;
-    }
-    return (unsigned char)*x - (unsigned char)*y;
-}
-
 /* Fills the file dialog's list with the entries of a->dir. */
 static void load_dir(App *a)
 {
     Dialog *d = &a->dlg;
-    size_t n = strlen(a->dir);
-    DIR *dir;
-    struct dirent *e;
+    size_t len = strlen(a->dir);
+    DirEntry *ents;
+    int n, i;
 
     /* the path label shows the tail of long paths */
-    field_set(dlg_find(d, ID_DIR), n < FIELD_MAX ? a->dir : a->dir + n - (FIELD_MAX - 1));
+    field_set(dlg_find(d, ID_DIR), len < FIELD_MAX ? a->dir : a->dir + len - (FIELD_MAX - 1));
     dlg_list_clear(d);
     d->sel = 0;
-    dir = opendir(a->dir);
-    if (!dir) {
+    n = dir_list(a->dir, 1, &ents);
+    if (n < 0) {
         str_copy(d->msg, sizeof d->msg, "Cannot read this directory.");
         return;
     }
-    while ((e = readdir(dir)) != NULL) {
-        char full[sizeof a->dir + 256], name[258];
-        struct stat st;
-        if (strcmp(e->d_name, ".") == 0)
-            continue;
-        if (strcmp(e->d_name, "..") == 0 && strcmp(a->dir, "/") == 0)
-            continue;
-        if (e->d_name[0] == '.' && strcmp(e->d_name, "..") != 0)
-            continue;
-        str_copy(full, sizeof full, a->dir);
-        str_cat(full, sizeof full, "/");
-        str_cat(full, sizeof full, e->d_name);
-        str_copy(name, sizeof name - 1, e->d_name);
-        if (stat(full, &st) == 0 && S_ISDIR(st.st_mode))
-            str_cat(name, sizeof name, "/");
-        dlg_list_add(d, name);
-    }
-    closedir(dir);
-    qsort(d->items, (size_t)d->nitems, sizeof(char *), cmp_items);
+    for (i = 0; i < n; i++)
+        dlg_list_add(d, ents[i].name);
+    dir_free(ents, n);
 }
 
 static void file_dialog(App *a, int save)
@@ -674,10 +626,8 @@ static int start_save(App *a, const char *path)
         set_msg(a, "Wait until the file is saved", NULL);
         return -1;
     }
-    if (a->job == J_REPLACE && a->job_win->ed.doc == ed->doc) {
-        set_msg(a, "Replace All is running (Esc stops it)", NULL);
+    if (!may_edit(a))           /* Replace All changes it */
         return -1;
-    }
     a->save = buf_save_begin(ed->doc->buf, path, err, sizeof err);
     if (!a->save) {
         message_dialog(a, "Cannot save", path, err);
@@ -876,87 +826,35 @@ static void save_steps(App *a, Uint64 end)
     }
 }
 
-/* A file size as ls -h shows it: "980", "4.2K", "17M". */
-static void format_size(char *out, double n)
-{
-    static const char units[] = " KMGT";
-    int u = 0;
-    while (n >= 1000 && u < 4) {
-        n /= 1024;
-        u++;
-    }
-    if (u == 0)
-        sprintf(out, "%d", (int)n);
-    else if (n < 9.95)
-        sprintf(out, "%.1f%c", n, units[u]);
-    else
-        sprintf(out, "%d%c", (int)(n + 0.5), units[u]);
-}
-
-/* A directory entry for the file menu. */
-typedef struct DirEntry {
-    char *name;             /* folders end in '/', as in the Open dialog */
-    char size[16];
-    int flags;              /* LI_* */
-} DirEntry;
-
-static int cmp_entries(const void *pa, const void *pb)
-{
-    return cmp_items(&((const DirEntry *)pa)->name, &((const DirEntry *)pb)->name);
-}
-
 /* Inserts the folders and then the files of directory path into the file
  * menu, from item at on, depth levels deep. The open file is checked.
  * Dotfiles are left out, as in the Open dialog. Returns how many items it
  * added, or -1 if the directory can't be read. */
 static int add_dir(App *a, const char *path, int at, int depth)
 {
-    DirEntry *ents = NULL;
-    int n = 0, i;
+    DirEntry *ents;
     struct stat cur;
     const char *cur_path = a->win->ed.doc->path;
     int have_cur = cur_path && stat(cur_path, &cur) == 0;
-    DIR *dir = opendir(path);
-    struct dirent *e;
+    int n = dir_list(path, 0, &ents), i, added = 0;
 
-    if (!dir)
-        return -1;
-    while ((e = readdir(dir)) != NULL) {
-        char full[sizeof a->pending_path + 256];
-        struct stat st;
-        DirEntry *d;
-        if (e->d_name[0] == '.')
-            continue;
-        str_copy(full, sizeof full, path);
-        str_cat(full, sizeof full, "/");
-        str_cat(full, sizeof full, e->d_name);
-        if (stat(full, &st) != 0 || !(S_ISDIR(st.st_mode) || S_ISREG(st.st_mode)))
-            continue;
-        /* the capacity is n rounded up to a power of two */
-        if ((n & (n - 1)) == 0)
-            ents = (DirEntry *)xrealloc(ents, (size_t)(n ? 2 * n : 1) * sizeof *ents);
-        d = &ents[n++];
-        d->name = (char *)xmalloc(strlen(e->d_name) + 2);
-        str_copy(d->name, strlen(e->d_name) + 2, e->d_name);
-        d->size[0] = 0;
-        d->flags = 0;
-        if (S_ISDIR(st.st_mode)) {
-            strcat(d->name, "/");
-            d->flags = LI_FOLDER;
-        } else {
-            format_size(d->size, (double)st.st_size);
-            if (have_cur && st.st_dev == cur.st_dev && st.st_ino == cur.st_ino)
-                d->flags = LI_CHECKED;
-        }
-    }
-    closedir(dir);
-    qsort(ents, (size_t)n, sizeof *ents, cmp_entries);
     for (i = 0; i < n; i++) {
-        menu_list_insert(&a->menu, at + i, ents[i].name, ents[i].size, depth, ents[i].flags);
-        free(ents[i].name);
+        const struct stat *st = &ents[i].st;
+        char size[16] = "";
+        int flags = 0;
+        if (S_ISDIR(st->st_mode)) {
+            flags = LI_FOLDER;
+        } else if (S_ISREG(st->st_mode)) {
+            format_size(size, (double)st->st_size);
+            if (have_cur && st->st_dev == cur.st_dev && st->st_ino == cur.st_ino)
+                flags = LI_CHECKED;
+        } else {
+            continue;
+        }
+        menu_list_insert(&a->menu, at + added++, ents[i].name, size, depth, flags);
     }
-    free(ents);
-    return n;
+    dir_free(ents, n);
+    return n < 0 ? -1 : added;
 }
 
 /* The path of file menu item i: a->dir, then the folders it is in. */
@@ -965,12 +863,10 @@ static void item_path(App *a, int i, char *out, size_t size)
     int p = menu_list_parent(&a->menu, i);
     if (p >= 0) {
         item_path(a, p, out, size);         /* ends in '/' */
+        str_cat(out, size, a->menu.list[i].label);
     } else {
-        str_copy(out, size, a->dir);
-        if (strcmp(a->dir, "/") != 0)
-            str_cat(out, size, "/");
+        path_join(out, size, a->dir, a->menu.list[i].label);
     }
-    str_cat(out, size, a->menu.list[i].label);
 }
 
 /* Pops up the folders and files of the current directory under the text
@@ -1042,17 +938,7 @@ static void file_accept(App *a)
         field_set(f, d->items[d->sel]);
     if (!f->len)
         return;
-    if (f->text[0] == '/') {
-        str_copy(path, sizeof path, f->text);
-    } else if (f->text[0] == '~' && (f->text[1] == '/' || !f->text[1]) && getenv("HOME")) {
-        str_copy(path, sizeof path, getenv("HOME"));
-        str_cat(path, sizeof path, f->text + 1);
-    } else {
-        str_copy(path, sizeof path, a->dir);
-        if (strcmp(a->dir, "/") != 0)
-            str_cat(path, sizeof path, "/");
-        str_cat(path, sizeof path, f->text);
-    }
+    path_resolve(path, sizeof path, a->dir, f->text);
     exists = stat(path, &st) == 0;
     if (exists && S_ISDIR(st.st_mode)) {
         char *rp = realpath(path, NULL);
@@ -1516,20 +1402,10 @@ static void draw_text(App *a, Window *w, TextArea ta)
     }
 }
 
-/* The scrollbar for a text area h rows tall: the track between the arrows,
- * and the thumb's position and length in it. */
-static void scrollbar_geometry(Editor *ed, int h, int *track, int *tpos, int *tlen)
+/* The scrollbar of a text area h rows tall. */
+static Scrollbar text_scrollbar(Editor *ed, int h)
 {
-    long total = ed_lines(ed), range = total - h;
-    *track = h - 2;
-    if (*track < 1)
-        *track = 1;
-    *tlen = total > h ? (int)((long)*track * h / total) : *track;
-    if (*tlen < 1)
-        *tlen = 1;
-    *tpos = range > 0 ? (int)((*track - *tlen) * ed->top / range) : 0;
-    if (*tpos > *track - *tlen)
-        *tpos = *track - *tlen;
+    return scrollbar_make(ed_lines(ed), ed->top, h);
 }
 
 /* Draws window w in its frame: double lined with an inverse title when it
@@ -1541,7 +1417,8 @@ static void draw_window(App *a, Window *w)
     const Theme *th = a->theme;
     TextArea ta = sync_view(a, w);
     int focused = w == a->win;
-    int i, n, x, track, tpos, tlen, right = w->x + w->w - 1, bottom = w->y + w->h - 1;
+    int i, n, x, right = w->x + w->w - 1, bottom = w->y + w->h - 1;
+    Scrollbar sb;
     char title[300], pos[96], line[300];
 
     screen_fill(s, w->x, w->y, w->w, w->h, ' ', th->text_fg, th->text_bg);
@@ -1561,12 +1438,8 @@ static void draw_window(App *a, Window *w)
                 focused ? th->title_bg : th->text_bg, i);
 
     /* scrollbar on the right border */
-    scrollbar_geometry(ed, ta.h, &track, &tpos, &tlen);
-    screen_put(s, right, ta.y, 0x25B2, th->frame, th->text_bg);
-    screen_put(s, right, ta.y + ta.h - 1, 0x25BC, th->frame, th->text_bg);
-    for (i = 0; i < track && ta.h > 2; i++)
-        screen_put(s, right, ta.y + 1 + i,
-                   i >= tpos && i < tpos + tlen ? 0x2588 : 0x2591, th->frame, th->text_bg);
+    sb = text_scrollbar(ed, ta.h);
+    screen_scrollbar(s, right, ta.y, &sb, th->frame, th->text_bg);
 
     /* status in the bottom border, TempleOS style. A message takes all
      * of the focused window's, inverse like the title, until it times out. */
@@ -1660,22 +1533,17 @@ static void cell_to_pos(App *a, int cx, int cy, long *ln, size_t *col)
     ed_pos_at(&a->win->ed, cy - ta.y, cx - ta.x, ln, col);
 }
 
+/* A click on the scrollbar scrolls, or grabs the thumb to drag it. */
 static void scrollbar_click(App *a, int cy, TextArea ta)
 {
     Editor *ed = &a->win->ed;
-    int track, tpos, tlen, r = cy - ta.y - 1;
-    scrollbar_geometry(ed, ta.h, &track, &tpos, &tlen);
-    if (cy == ta.y)
-        ed_scroll(ed, -1);
-    else if (cy == ta.y + ta.h - 1)
-        ed_scroll(ed, 1);
-    else if (r < tpos)
-        ed_scroll(ed, -(ta.h - 1));
-    else if (r >= tpos + tlen)
-        ed_scroll(ed, ta.h - 1);
-    else {
+    Scrollbar sb = text_scrollbar(ed, ta.h);
+    int rows = scrollbar_step(&sb, cy - ta.y);
+    if (rows) {
+        ed_scroll(ed, rows);
+    } else {
         a->drag = 2;
-        a->drag_grab = r - tpos;
+        a->drag_grab = cy - ta.y - 1 - sb.pos;
     }
 }
 
@@ -1683,19 +1551,19 @@ static void scrollbar_drag(App *a, int cy)
 {
     TextArea ta = text_area(a, a->win);
     Editor *ed = &a->win->ed;
-    int track, tpos, tlen;
+    Scrollbar sb = text_scrollbar(ed, ta.h);
     long range = ed_lines(ed) - ta.h;
-    scrollbar_geometry(ed, ta.h, &track, &tpos, &tlen);
-    if (range <= 0 || track - tlen <= 0)
+    int room = sb.track - sb.len, pos;
+    if (range <= 0 || room <= 0)
         return;
-    tpos = cy - ta.y - 1 - a->drag_grab;
-    if (tpos < 0)
-        tpos = 0;
-    if (tpos > track - tlen)
-        tpos = track - tlen;
-    /* round up, so scrollbar_geometry's rounding down puts the thumb back
+    pos = cy - ta.y - 1 - a->drag_grab;
+    if (pos < 0)
+        pos = 0;
+    if (pos > room)
+        pos = room;
+    /* round up, so scrollbar_make's rounding down puts the thumb back
      * under the pointer */
-    ed->top = ((long)tpos * range + track - tlen - 1) / (track - tlen);
+    ed->top = ((long)pos * range + room - 1) / room;
     ed->top_row = 0;
     ed_scroll(ed, 0);
 }

@@ -16,7 +16,7 @@ BUILD = build
 OBJ_DIR = $(BUILD)/obj
 
 CORE = editor window buffer undo utf8 util
-APP  = main ui menu dialog theme screen font font8x8 font12x12 font20x20 \
+APP  = main ui menu dialog path theme screen font font8x8 font12x12 \
        cursor config syntax langs $(CORE)
 OBJ  = $(APP:%=$(OBJ_DIR)/%.o)
 LIB  = $(filter-out $(OBJ_DIR)/main.o,$(OBJ))

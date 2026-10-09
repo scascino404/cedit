@@ -56,14 +56,7 @@ typedef struct Rule {
 #define SYN_NUMBERS  0x01   /* classify numbers */
 #define SYN_DIGITSEP 0x02   /* ' separates digits, as in 1'000 (C23, C++) */
 
-typedef struct Syntax Syntax;
-
-/* A lexer: classifies s[0..len) into cls (unless cls is NULL) starting in
- * state, and returns the state at the end of the line. */
-typedef unsigned (*LexFn)(const Syntax *syn, unsigned state, const char *s,
-                          size_t len, unsigned char *cls);
-
-struct Syntax {
+typedef struct Syntax {
     const char *name;
     const char *files;      /* extensions (".c") and file names
                                ("Makefile"), separated by spaces */
@@ -74,7 +67,6 @@ struct Syntax {
     int flags;              /* SYN_* */
     const Rule *rules;      /* tried in order at each position */
     int nrules;
-    LexFn lex;              /* NULL: syn_lex_rules */
 
     /* filled in by syn_prepare */
     int ready;
@@ -84,7 +76,7 @@ struct Syntax {
     const char *wword[256];     /* NULL: an empty slot */
     unsigned char wlen[256], wcls[256];
     size_t wmax;                /* the longest one */
-};
+} Syntax;
 
 /* The languages (langs.c). */
 extern Syntax syn_langs[];
@@ -96,12 +88,11 @@ void syn_prepare(Syntax *syn);
  * NULL. */
 const Syntax *syn_detect(const char *path, const char *line1, size_t len);
 
-/* Lexes one line with the language's lexer (see LexFn). */
+/* Lexes one line by the language's rules: classifies s[0..len) into cls
+ * (unless cls is NULL) starting in state, and returns the state at the end
+ * of the line. */
 unsigned syn_lex(const Syntax *syn, unsigned state, const char *s, size_t len,
                  unsigned char *cls);
-/* The rule engine, the lexer of every language without its own. */
-unsigned syn_lex_rules(const Syntax *syn, unsigned state, const char *s,
-                       size_t len, unsigned char *cls);
 
 /*
  * The lexer states at the start of every HL_STEP-th line of a buffer,

@@ -556,13 +556,8 @@ int buf_open(Buffer *b, const char *path, int *is_new, char *err,
         char *d = (char *)xmalloc(cap);
         for (;;) {
             ssize_t r;
-            if (len == cap) {
-                char *nd = (char *)xmalloc(cap * 2);
-                memcpy(nd, d, len);
-                free(d);
-                d = nd;
-                cap *= 2;
-            }
+            if (len == cap)
+                d = (char *)xrealloc(d, cap *= 2);
             r = read(fd, d + len, cap - len);
             if (r < 0 && errno == EINTR)
                 continue;
@@ -823,9 +818,15 @@ void buf_copy(Buffer *b, size_t off, size_t n, char *dst)
     }
 }
 
-static int lower(int c)
+/* The bytes a match can start with: pat's first, or ignoring case its
+ * lowercase and uppercase forms (the same byte if it is not a letter). */
+static void first_byte(const char *pat, int icase, int *lo, int *up)
 {
-    return c >= 'A' && c <= 'Z' ? c + 32 : c;
+    *lo = *up = (unsigned char)pat[0];
+    if (icase) {
+        *lo = ascii_lower(*lo);
+        *up = *lo >= 'a' && *lo <= 'z' ? *lo - 32 : *lo;
+    }
 }
 
 /* First match in s[0..n), or -1. The candidates are found with memchr: for
@@ -835,14 +836,11 @@ static long search_fwd(const char *s, size_t n, const char *pat, size_t plen,
                        int icase)
 {
     const char *end, *p, *q, *c;
-    int lo = (unsigned char)pat[0], up = lo;
+    int lo, up;
 
     if (n < plen)
         return -1;
-    if (icase) {
-        lo = lower(lo);
-        up = lo >= 'a' && lo <= 'z' ? lo - 32 : lo;
-    }
+    first_byte(pat, icase, &lo, &up);
     end = s + n - plen + 1;             /* matches start before this */
     p = (const char *)memchr(s, lo, (size_t)(end - s));
     q = up != lo ? (const char *)memchr(s, up, (size_t)(end - s)) : NULL;
@@ -863,13 +861,14 @@ static long search_bwd(const char *s, size_t n, size_t lo, const char *pat,
                        size_t plen, int icase)
 {
     size_t i;
-    int c0 = (unsigned char)pat[0], l0 = lower(c0);
+    int c0, c1;
 
     if (n < plen)
         return -1;
+    first_byte(pat, icase, &c0, &c1);
     for (i = n - plen + 1; i > lo; i--) {
         int c = (unsigned char)s[i - 1];
-        if ((c == c0 || (icase && lower(c) == l0)) &&
+        if ((c == c0 || c == c1) &&
             mem_match(s + i - 1, pat, plen, icase))
             return (long)(i - 1);
     }

@@ -219,6 +219,46 @@ void screen_cursor(Screen *s, int x, int y, int shape)
         c->cur = (unsigned char)shape;
 }
 
+Scrollbar scrollbar_make(long total, long top, int h)
+{
+    Scrollbar sb;
+    long range = total - h;
+
+    sb.h = h;
+    sb.track = h - 2 < 1 ? 1 : h - 2;
+    sb.len = total > h ? (int)((long)sb.track * h / total) : sb.track;
+    if (sb.len < 1)
+        sb.len = 1;
+    sb.pos = range > 0 ? (int)((sb.track - sb.len) * top / range) : 0;
+    if (sb.pos > sb.track - sb.len)
+        sb.pos = sb.track - sb.len;
+    return sb;
+}
+
+void screen_scrollbar(Screen *s, int x, int y, const Scrollbar *sb, int fg,
+                      int bg)
+{
+    int i;
+    screen_put(s, x, y, 0x25B2, fg, bg);
+    screen_put(s, x, y + sb->h - 1, 0x25BC, fg, bg);
+    for (i = 0; i < sb->track && sb->h > 2; i++)
+        screen_put(s, x, y + 1 + i,
+                   i >= sb->pos && i < sb->pos + sb->len ? 0x2588 : 0x2591, fg, bg);
+}
+
+int scrollbar_step(const Scrollbar *sb, int r)
+{
+    if (r == 0)
+        return -1;
+    if (r == sb->h - 1)
+        return 1;
+    if (r - 1 < sb->pos)
+        return -(sb->h - 1);
+    if (r - 1 >= sb->pos + sb->len)
+        return sb->h - 1;
+    return 0;
+}
+
 int screen_label(Screen *s, int x, int y, const char *label, int fg, int hot,
                  int bg)
 {

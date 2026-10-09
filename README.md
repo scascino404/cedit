@@ -122,14 +122,15 @@ Settings are changed from the menus and remembered across sessions in
 | `src/undo.c` | Linear undo/redo of byte-level insert/delete ops, grouped into steps |
 | `src/editor.c` | Cursor, selection, edit commands, search/replace, and documents shown in several views. No SDL code |
 | `src/window.c` | The tree of editor windows: splitting, closing, layout, and the window or border at a cell. No SDL code |
-| `src/screen.c` | A text-mode cell grid with box and label drawing. Only changed cells are rasterized, and the image is scaled up by integer factors |
+| `src/screen.c` | A text-mode cell grid with box, label and scrollbar drawing. Only changed cells are rasterized, and the image is scaled up by integer factors |
 | `src/ui.c` | The application: commands, the concrete dialogs, the editor windows, input handling |
 | `src/menu.c` | The menu tables (every command with its label and shortcut), menu drawing and navigation, and the scrolling tree menu for files |
 | `src/dialog.c` | Generic dialog boxes: labels, input fields, checkboxes, buttons and a list box |
+| `src/path.c` | Paths and sorted directory listings for the file dialogs and the file menu. No SDL code |
 | `src/theme.c` | The light and dark color themes |
 | `src/syntax.c` | Syntax highlighting: the rule-driven lexer, language detection, and the cache of lexer states at line starts |
 | `src/langs.c` | The language definitions: rules and word lists for each language |
-| `src/font8x8.c`, `src/font12x12.c`, `src/font20x20.c` | The hand-drawn "Temple" font at 8×8, 12×12 and 20×20, as ASCII art |
+| `src/font8x8.c`, `src/font12x12.c`, `src/font20x20.c` | The hand-drawn "Temple" font at 8×8, 12×12 and 20×20, as ASCII art (no text size uses the 20×20 one; only `fontsheet` builds it) |
 | `src/font.c` | Builds the glyph tables: box drawing from stroke rules, accented Latin-1 letters by composition |
 | `src/cursor.c` | Hand-drawn mouse pointer (the TempleOS arrow) and text cursor shapes |
 | `src/config.c` | Loads and saves the settings file, driven by one table of keys |
@@ -148,8 +149,7 @@ Settings are changed from the menus and remembered across sessions in
 - **A language:** write its rules and word lists in `src/langs.c` and add a
   row to `syn_langs` with its file extensions or names (and the
   interpreters a `#!` line may name). The rule kinds and flags are described
-  in `src/syntax.h`. A language the rules can't describe can bring its own
-  lexer function instead.
+  in `src/syntax.h`.
 - **A highlight color:** the lexer tells keywords, types, comments, strings,
   numbers and preprocessor directives apart; each theme maps them to colors
   in its `hl` row in `src/theme.c`.

@@ -39,6 +39,7 @@ int main(int argc, char **argv)
              * come all at once; the cursor takes one step per draw, not
              * a jump. Only the first press of a step key counts. */
             last.sym = SDLK_UNKNOWN;
+            last.mod = KMOD_NONE;
             do {
                 if (e.type == SDL_KEYDOWN && step_key(e.key.keysym.sym)) {
                     if (e.key.keysym.sym == last.sym && e.key.keysym.mod == last.mod)

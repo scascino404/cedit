@@ -221,16 +221,10 @@ static void reveal(MenuBar *m)
         m->top = m->item - m->rows + 1;
 }
 
-/* The scrollbar of a menu too long for the screen, as for the editor window: the track
- * between the arrows, and the thumb's position and length in it. */
-static void thumb(const MenuBar *m, int *track, int *tpos, int *tlen)
+/* The scrollbar of a menu too long for the screen. */
+static Scrollbar menu_scrollbar(const MenuBar *m)
 {
-    int n = count(m), range = n - m->rows;
-    *track = m->rows - 2 < 1 ? 1 : m->rows - 2;
-    *tlen = *track * m->rows / n;
-    if (*tlen < 1)
-        *tlen = 1;
-    *tpos = range > 0 ? (*track - *tlen) * m->top / range : 0;
+    return scrollbar_make(count(m), m->top, m->rows);
 }
 
 /* Fits the open menu to the screen: scrolls it so the highlight shows, and
@@ -515,14 +509,8 @@ void menu_draw(const MenuBar *m, Screen *s, const Theme *t, CmdState state,
 
     /* a menu too long for the screen gets a scrollbar on its right border */
     if (count(m) > m->rows) {
-        int track, tpos, tlen;
-        thumb(m, &track, &tpos, &tlen);
-        x += w - 1;
-        screen_put(s, x, y + 1, 0x25B2, t->frame, t->text_bg);
-        screen_put(s, x, y + h - 2, 0x25BC, t->frame, t->text_bg);
-        for (i = 0; i < track && m->rows > 2; i++)
-            screen_put(s, x, y + 2 + i, i >= tpos && i < tpos + tlen ? 0x2588 : 0x2591,
-                       t->frame, t->text_bg);
+        Scrollbar sb = menu_scrollbar(m);
+        screen_scrollbar(s, x + w - 1, y + 1, &sb, t->frame, t->text_bg);
     }
 }
 
@@ -636,21 +624,6 @@ int menu_key(MenuBar *m, SDL_Keycode sym)
     return CMD_NONE;
 }
 
-/* A click on the scrollbar of a long menu, row r of its border. */
-static void scrollbar_click(MenuBar *m, int r)
-{
-    int track, tpos, tlen;
-    thumb(m, &track, &tpos, &tlen);
-    if (r == 0)
-        scroll(m, -1);
-    else if (r == m->rows - 1)
-        scroll(m, 1);
-    else if (r - 1 < tpos)
-        scroll(m, -(m->rows - 1));
-    else if (r - 1 >= tpos + tlen)
-        scroll(m, m->rows - 1);
-}
-
 int menu_click(MenuBar *m, int cx, int cy)
 {
     int item = item_at(m, cx, cy), i = cy == 0 ? title_at(cx) : -1;
@@ -663,7 +636,8 @@ int menu_click(MenuBar *m, int cx, int cy)
         int x, y, w, h;
         geometry(m, &x, &y, &w, &h);
         if (cx == x + w - 1 && cy > y && cy < y + h - 1) {
-            scrollbar_click(m, cy - y - 1);
+            Scrollbar sb = menu_scrollbar(m);
+            scroll(m, scrollbar_step(&sb, cy - y - 1));
             return CMD_NONE;
         }
     }

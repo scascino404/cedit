@@ -52,70 +52,19 @@ Uint32 *pointer_pixels(int *w, int *h, int *hx, int *hy)
 }
 
 /* Text cursors. Insert mode is the solid TempleOS block; overwrite mode is a
- * hollow box, so the character being replaced stays readable. */
-static const char *const tc_overwrite8[8] = {
-    "########",
-    "#......#",
-    "#......#",
-    "#......#",
-    "#......#",
-    "#......#",
-    "#......#",
-    "########"
-};
-
-static const char *const tc_overwrite12[12] = {
-    "############",
-    "############",
-    "##........##",
-    "##........##",
-    "##........##",
-    "##........##",
-    "##........##",
-    "##........##",
-    "##........##",
-    "##........##",
-    "############",
-    "############"
-};
-
-static const char *const tc_overwrite20[20] = {
-    "####################",
-    "####################",
-    "####################",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "###..............###",
-    "####################",
-    "####################",
-    "####################"
-};
-
+ * hollow box, so the character being replaced stays readable. Its lines are
+ * as thick as the font's strokes: 1 px at 8 px, 2 at 12 and 3 at 20. */
 unsigned long text_cursor_row(int shape, int h, int y)
 {
-    const char *row;
+    int t = (h + 4) / 8, x;
     unsigned long bits = 0;
-    int x;
 
     if (shape == TCUR_INSERT)
         return 0xFFFFFFFFUL;
     if (shape != TCUR_OVERWRITE || y < 0 || y >= h)
         return 0;
-    row = h == 20 ? tc_overwrite20[y] : h == 12 ? tc_overwrite12[y]
-                                                : tc_overwrite8[y];
-    for (x = 0; row[x]; x++)
-        if (row[x] == '#')
+    for (x = 0; x < h; x++)         /* the cell is square */
+        if (y < t || y >= h - t || x < t || x >= h - t)
             bits |= FONT_BIT(x);
     return bits;
 }
