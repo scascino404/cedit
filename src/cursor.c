@@ -1,5 +1,5 @@
 /*
- * cursor.c - cedit's mouse pointers and text cursors, drawn by hand.
+ * cursor.c - cedit's mouse pointer and text cursors, drawn by hand.
  *
  * Pointer art: '#' black, 'o' white, ' ' transparent; '+' marks the hot spot
  * (drawn black). The pointer is drawn by screen.c, not by the OS.
@@ -26,48 +26,9 @@ static const char *const arrow[] = {
     NULL
 };
 
-static const char *const ibeam[] = {
-    "ooo ooo",
-    "o##o##o",
-    "ooo#ooo",
-    "  o#o  ",
-    "  o#o  ",
-    "  o#o  ",
-    "  o#o  ",
-    "  o+o  ",
-    "  o#o  ",
-    "  o#o  ",
-    "  o#o  ",
-    "  o#o  ",
-    "ooo#ooo",
-    "o##o##o",
-    "ooo ooo",
-    NULL
-};
-
-static const char *const hourglass[] = {
-    "###########",
-    "#ooooooooo#",
-    " #ooooooo# ",
-    " #o#####o# ",
-    " #oo###oo# ",
-    "  #oo#oo#  ",
-    "   #o#o#   ",
-    "    #+#    ",
-    "   #ooo#   ",
-    "  #oo#oo#  ",
-    " #ooo#ooo# ",
-    " #oo###oo# ",
-    " #o#####o# ",
-    "#ooooooooo#",
-    "###########",
-    NULL
-};
-
-Uint32 *pointer_pixels(int which, int *w, int *h, int *hx, int *hy)
+Uint32 *pointer_pixels(int *w, int *h, int *hx, int *hy)
 {
-    const char *const *art = which == PTR_IBEAM ? ibeam
-                           : which == PTR_WAIT ? hourglass : arrow;
+    const char *const *art = arrow;
     Uint32 *px;
     int x, y;
 

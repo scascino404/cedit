@@ -56,38 +56,30 @@ int screen_init(Screen *s, int size)
     return 0;
 }
 
-/* (Re)creates the pointer textures; textures are lost on a device reset. */
-static void make_pointer_textures(Screen *s)
+/* (Re)creates the pointer texture; textures are lost on a device reset. */
+static void make_pointer_texture(Screen *s)
 {
-    int i;
-    for (i = 0; i < PTR_COUNT; i++) {
-        Uint32 *px;
-        if (s->ptr_tex[i])
-            SDL_DestroyTexture(s->ptr_tex[i]);
-        s->ptr_tex[i] = NULL;
-        px = pointer_pixels(i, &s->ptr_w[i], &s->ptr_h[i], &s->ptr_hx[i],
-                            &s->ptr_hy[i]);
-        if (!px)
-            continue;
-        s->ptr_tex[i] = SDL_CreateTexture(s->ren, SDL_PIXELFORMAT_ARGB8888,
-                                          SDL_TEXTUREACCESS_STATIC,
-                                          s->ptr_w[i], s->ptr_h[i]);
-        if (s->ptr_tex[i]) {
-            SDL_UpdateTexture(s->ptr_tex[i], NULL, px,
-                              s->ptr_w[i] * (int)sizeof(Uint32));
-            SDL_SetTextureBlendMode(s->ptr_tex[i], SDL_BLENDMODE_BLEND);
-            SDL_SetTextureScaleMode(s->ptr_tex[i], SDL_ScaleModeNearest);
-        }
-        SDL_free(px);
+    Uint32 *px;
+    if (s->ptr_tex)
+        SDL_DestroyTexture(s->ptr_tex);
+    s->ptr_tex = NULL;
+    px = pointer_pixels(&s->ptr_w, &s->ptr_h, &s->ptr_hx, &s->ptr_hy);
+    if (!px)
+        return;
+    s->ptr_tex = SDL_CreateTexture(s->ren, SDL_PIXELFORMAT_ARGB8888,
+                                   SDL_TEXTUREACCESS_STATIC, s->ptr_w, s->ptr_h);
+    if (s->ptr_tex) {
+        SDL_UpdateTexture(s->ptr_tex, NULL, px, s->ptr_w * (int)sizeof(Uint32));
+        SDL_SetTextureBlendMode(s->ptr_tex, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(s->ptr_tex, SDL_ScaleModeNearest);
     }
+    SDL_free(px);
 }
 
 void screen_quit(Screen *s)
 {
-    int i;
-    for (i = 0; i < PTR_COUNT; i++)
-        if (s->ptr_tex[i])
-            SDL_DestroyTexture(s->ptr_tex[i]);
+    if (s->ptr_tex)
+        SDL_DestroyTexture(s->ptr_tex);
     if (s->tex)
         SDL_DestroyTexture(s->tex);
     if (s->ren)
@@ -145,7 +137,7 @@ void screen_layout(Screen *s)
         if (s->tex)
             SDL_SetTextureScaleMode(s->tex, SDL_ScaleModeNearest);
     }
-    make_pointer_textures(s);
+    make_pointer_texture(s);
     s->full = 1;
 }
 
@@ -344,15 +336,14 @@ void screen_present(Screen *s)
     }
     fill_rect(s, 0, dst.h, dst.w, s->out_h - dst.h,
               s->cells[(s->rows - 1) * s->cols].bg);
-    if (s->ptr_visible && s->ptr_tex[s->ptr_kind]) {
+    if (s->ptr_visible && s->ptr_tex) {
         /* about the font's pixel size, hot spot pixel under the mouse */
-        int k = s->ptr_kind;
         SDL_Rect r;
-        r.x = s->ptr_x - s->ptr_hx[k] * s->ptr_scale;
-        r.y = s->ptr_y - s->ptr_hy[k] * s->ptr_scale;
-        r.w = s->ptr_w[k] * s->ptr_scale;
-        r.h = s->ptr_h[k] * s->ptr_scale;
-        SDL_RenderCopy(s->ren, s->ptr_tex[k], NULL, &r);
+        r.x = s->ptr_x - s->ptr_hx * s->ptr_scale;
+        r.y = s->ptr_y - s->ptr_hy * s->ptr_scale;
+        r.w = s->ptr_w * s->ptr_scale;
+        r.h = s->ptr_h * s->ptr_scale;
+        SDL_RenderCopy(s->ren, s->ptr_tex, NULL, &r);
     }
     SDL_RenderPresent(s->ren);
 }

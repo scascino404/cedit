@@ -171,16 +171,11 @@ static void current_dir(App *a)
     }
 }
 
-/* Loads the rest of a file that is still being indexed, showing the busy
- * pointer for the moment it takes. */
+/* Loads the rest of a file that is still being indexed. */
 static void finish_loading(App *a)
 {
-    if (buf_loading(a->ed.buf)) {
-        a->scr.ptr_kind = PTR_WAIT;
-        screen_present(&a->scr);        /* show the hourglass now */
+    if (buf_loading(a->ed.buf))
         buf_load_all(a->ed.buf);
-        a->scr.ptr_kind = PTR_ARROW;
-    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -836,7 +831,6 @@ static void save_settings(App *a)
 static void set_size(App *a, int size)
 {
     screen_set_size(&a->scr, size);
-    a->scr.ptr_kind = PTR_ARROW;
     save_settings(a);
 }
 
@@ -1345,9 +1339,6 @@ static void mouse_motion(App *a, const SDL_MouseMotionEvent *m)
         return;
     }
     menu_hover(&a->menu, cx, cy);
-    a->scr.ptr_kind = a->dlg.kind == DLG_NONE && a->menu.open < 0 && cy >= ta.y &&
-                              cy < ta.y + ta.h && cx >= ta.x && cx < ta.x + ta.w
-                          ? PTR_IBEAM : PTR_ARROW;
 }
 
 static void mouse_wheel(App *a, const SDL_MouseWheelEvent *w)
@@ -1647,7 +1638,6 @@ int app_init(App *a, int argc, char **argv)
     apply_theme(a);
     /* the system pointer stays hidden over the window; we draw our own */
     SDL_ShowCursor(SDL_DISABLE);
-    a->scr.ptr_kind = PTR_ARROW;
     if (SDL_GetMouseFocus() == a->scr.win) {
         int x, y;
         SDL_GetMouseState(&x, &y);

@@ -122,7 +122,7 @@ Settings are changed from the menus and remembered across sessions in
 | `src/langs.c` | The language definitions: rules and word lists for each language |
 | `src/font8x8.c`, `src/font12x12.c`, `src/font20x20.c` | The hand-drawn "Temple" font at 8×8, 12×12 and 20×20, as ASCII art |
 | `src/font.c` | Builds the glyph tables: box drawing from stroke rules, accented Latin-1 letters by composition |
-| `src/cursor.c` | Hand-drawn mouse pointers (the TempleOS arrow, I-beam, hourglass) and text cursor shapes |
+| `src/cursor.c` | Hand-drawn mouse pointer (the TempleOS arrow) and text cursor shapes |
 | `src/config.c` | Loads and saves the settings file, driven by one table of keys |
 | `src/util.c` | Allocation and string helpers shared by all modules |
 

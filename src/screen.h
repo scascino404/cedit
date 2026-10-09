@@ -59,10 +59,9 @@ typedef struct Screen {
      * fractional display scales (blurring them); drawing the pointer into
      * our own frame keeps it pixel-exact like the text. */
     int ptr_visible;                /* the mouse is over the window */
-    int ptr_kind;                   /* PTR_* */
     int ptr_x, ptr_y;               /* position in output pixels */
-    SDL_Texture *ptr_tex[PTR_COUNT];
-    int ptr_w[PTR_COUNT], ptr_h[PTR_COUNT], ptr_hx[PTR_COUNT], ptr_hy[PTR_COUNT];
+    SDL_Texture *ptr_tex;
+    int ptr_w, ptr_h, ptr_hx, ptr_hy;
     int win_w, win_h, out_w, out_h;
 } Screen;
 
