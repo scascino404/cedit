@@ -20,7 +20,7 @@
  * and moves that wait for loading go on over many frames: for those, the
  * metric is the time until they are over, and metric_frame the longest
  * frame meanwhile. The SDL calls that scale and
- * show the frame are replaced by no-ops (the Makefile links with --wrap):
+ * show the frame are replaced by no-ops (CMakeLists.txt links with --wrap):
  * on a real display the GPU does that work, and the offscreen software
  * renderer would only add noise. Rasterizing the changed cells and the
  * texture upload are kept; "raster" metrics time screen_present alone.
@@ -134,7 +134,7 @@ static void report_lat(const char *metric, Samples *s)
 }
 
 /* ------------------------------------------------------------------ */
-/* the frame, without the GPU's part (see --wrap in the Makefile)      */
+/* the frame, without the GPU's part (see --wrap in CMakeLists.txt)   */
 /* ------------------------------------------------------------------ */
 
 static double raster_ms;        /* screen_present time of the last frame */

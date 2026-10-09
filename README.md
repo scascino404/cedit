@@ -32,21 +32,30 @@ It borrows from two places:
 
 ## Build
 
-You need a C compiler, `make`, and the SDL2 development files:
+You need a C compiler, CMake 3.27 or newer, Ninja, and the SDL2 development
+files:
 
 | System | Install |
 |---|---|
-| Debian, Ubuntu | `sudo apt install build-essential clang libsdl2-dev` |
-| Fedora | `sudo dnf install make clang SDL2-devel` |
-| Arch | `sudo pacman -S base-devel clang sdl2` |
-| macOS | `xcode-select --install`, then `brew install sdl2` |
+| Debian, Ubuntu | `sudo apt install build-essential clang cmake ninja-build libsdl2-dev` |
+| Fedora | `sudo dnf install clang cmake ninja-build SDL2-devel` |
+| Arch | `sudo pacman -S base-devel clang cmake ninja sdl2` |
+| macOS | `xcode-select --install`, then `brew install cmake ninja sdl2` |
+
+Debian 12 and Ubuntu 22.04 ship an older CMake; `pipx install cmake` gets a
+current one.
 
 Then build it, and optionally install it:
 
 ```sh
-make -j                 # builds build/cedit
-sudo make install       # copies it to /usr/local/bin
+cmake --preset default            # configure, once
+cmake --build --preset default    # builds build/cedit
+ctest --preset default            # runs the tests
+sudo cmake --install build        # copies it to /usr/local/bin
 ```
+
+The preset builds with clang and Ninja. To use gcc, configure with
+`cmake --preset default -DCMAKE_C_COMPILER=gcc`.
 
 ## Run
 
