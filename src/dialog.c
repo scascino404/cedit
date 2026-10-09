@@ -438,7 +438,11 @@ int dlg_key(Dialog *d, const SDL_KeyboardEvent *k)
     Widget *w = d->focus >= 0 ? &d->wd[d->focus] : NULL;
     int ctrl = (k->keysym.mod & KMOD_CTRL) != 0;
     int shift = (k->keysym.mod & KMOD_SHIFT) != 0;
+#ifdef __APPLE__
+    int alt = 0;                        /* Option types characters */
+#else
     int alt = (k->keysym.mod & KMOD_ALT) != 0;
+#endif
     SDL_Keycode sym = k->keysym.sym;
     int i, step;
 

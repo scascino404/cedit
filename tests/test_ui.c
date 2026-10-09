@@ -150,9 +150,29 @@ static void test_moves(void)
 }
 
 #ifdef __APPLE__
-/* Cmd works as Ctrl. */
-static void test_cmd(void)
+/* Text that comes with mod held. */
+static void text_with(const char *s, SDL_Keymod mod)
 {
+    SDL_SetModState(mod);
+    text(s);
+    SDL_SetModState(KMOD_NONE);
+}
+
+/* The number of checked checkboxes in the dialog. */
+static int checked(void)
+{
+    int i, n = 0;
+    for (i = 0; i < app.dlg.n; i++)
+        n += app.dlg.wd[i].kind == W_CHECK && app.dlg.wd[i].checked;
+    return n;
+}
+
+/* On macOS, Cmd works as Ctrl, and both Option keys type characters. */
+static void test_mac(void)
+{
+    const Widget *f;
+    int n;
+
     open_file();
     key(SDLK_END, KMOD_LGUI);
     drain();
@@ -160,9 +180,30 @@ static void test_cmd(void)
     key(SDLK_a, KMOD_RGUI);
     CHECK(ed()->sel);
     /* text that comes with Cmd held is a command, not text */
-    SDL_SetModState(KMOD_LGUI);
-    text("q");
-    SDL_SetModState(KMOD_NONE);
+    text_with("q", KMOD_LGUI);
+    CHECK(!ed_modified(ed()));
+
+    /* Option+F types, rather than opening the File menu */
+    key(SDLK_HOME, KMOD_LGUI);
+    CHECK(!ed()->sel && ed()->cy == 0);
+    key(SDLK_f, KMOD_LALT);
+    CHECK(app.menu.open < 0);
+    text_with("\xc6\x92", KMOD_LALT);      /* f with hook */
+    CHECK(starts(0, "\xc6\x92line 0000000"));
+
+    /* and Option+C in the Find field types, rather than toggling Match case */
+    key(SDLK_f, KMOD_LGUI);
+    CHECK(app.dlg.kind != DLG_NONE);
+    f = &app.dlg.wd[app.dlg.focus];
+    CHECK(f->kind == W_FIELD);
+    n = checked();
+    key(SDLK_c, KMOD_LALT);
+    text_with("\xc3\xa7", KMOD_LALT);      /* c with cedilla */
+    CHECK(checked() == n);
+    CHECK(strstr(f->text, "\xc3\xa7") != NULL);
+    key(SDLK_ESCAPE, 0);
+    CHECK(app.dlg.kind == DLG_NONE);
+    key(SDLK_z, KMOD_LGUI);
     CHECK(!ed_modified(ed()));
 }
 #endif
@@ -220,6 +261,20 @@ static void test_find(void)
     CHECK(!ed_modified(ed()));
 }
 
+/* Presses the dialog button with hotkey sym: Alt+letter, or on macOS,
+ * where Option types characters, the plain letter once Tab has moved the
+ * focus out of the text fields. */
+static void press(SDL_Keycode sym)
+{
+#ifdef __APPLE__
+    while (app.dlg.wd[app.dlg.focus].kind == W_FIELD)
+        key(SDLK_TAB, 0);
+    key(sym, 0);
+#else
+    key(sym, KMOD_LALT);
+#endif
+}
+
 static void test_replace_all(void)
 {
     /* "line 00" starts the first 100000 lines */
@@ -228,7 +283,7 @@ static void test_replace_all(void)
     app.opt.icase = 0;
     key(SDLK_HOME, KMOD_LCTRL);
     key(SDLK_h, KMOD_LCTRL);
-    key(SDLK_a, KMOD_LALT);
+    press(SDLK_a);
     CHECK(app.job == J_REPLACE);
     frame();
     /* Esc stops it, keeping what it replaced as one undo step */
@@ -244,7 +299,7 @@ static void test_replace_all(void)
     /* the document can't change meanwhile (the dialog closed as its
      * Close button does) */
     key(SDLK_h, KMOD_LCTRL);
-    key(SDLK_a, KMOD_LALT);
+    press(SDLK_a);
     dlg_close(&app.dlg);
     text("Y");
     CHECK(strcmp(app.msg, "Replace All is running (Esc stops it)") == 0);
@@ -352,7 +407,7 @@ int main(void)
 
     test_moves();
 #ifdef __APPLE__
-    test_cmd();
+    test_mac();
 #endif
     test_find();
     test_replace_all();

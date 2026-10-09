@@ -79,10 +79,13 @@ menus, and cedit remembers them in `~/.config/cedit/cedit.conf`.
 
 On macOS, `Cmd` works as `Ctrl` as well, except where the system's own
 application menu answers first: `Cmd+Q` and `Cmd+W` exit (asking to save, as
-`Ctrl+Q` does), and `Cmd+H` hides the app. Use `Ctrl+W` and `Ctrl+H` for
-Close Window and Replace. macOS also takes `Ctrl+arrows` for Mission Control
-and Spaces by default, so word moves and scrolling with them need those
-shortcuts turned off in System Settings → Keyboard → Keyboard Shortcuts.
+`Ctrl+Q` does), and `Cmd+H` hides the app. Use `Ctrl+W` and `Ctrl+H` for Close
+Window and Replace. Both `Option` keys type characters, as elsewhere on the
+Mac, so the menu bar opens with `F10` or a tap of `Option`, and a dialog's
+buttons with `Tab` or, once the focus is off the text fields, their underlined
+letter. macOS also takes `Ctrl+arrows` for Mission Control and Spaces by
+default, so word moves and scrolling with them need those shortcuts turned off
+in System Settings → Keyboard → Keyboard Shortcuts.
 
 ## License
 

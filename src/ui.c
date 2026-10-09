@@ -112,6 +112,14 @@ static SDL_Keymod mod_state(void)
     return cmd_as_ctrl(SDL_GetModState());
 }
 
+/* The Alt keys whose chords are commands: left Alt, as AltGr types
+ * characters; on macOS neither, as both Option keys type them. */
+#ifdef __APPLE__
+#define CMD_ALT KMOD_NONE
+#else
+#define CMD_ALT KMOD_LALT
+#endif
+
 static void set_msg(App *a, const char *s1, const char *s2)
 {
     str_copy(a->msg, sizeof a->msg, s1);
@@ -1916,7 +1924,7 @@ static void key_down(App *a, const SDL_KeyboardEvent *k)
                (sym == SDLK_LEFT || sym == SDLK_RIGHT || sym == SDLK_UP || sym == SDLK_DOWN)) {
         focus_toward(a, sym == SDLK_LEFT ? -1 : sym == SDLK_RIGHT,
                      sym == SDLK_UP ? -1 : sym == SDLK_DOWN);
-    } else if ((k->keysym.mod & KMOD_LALT) && !(k->keysym.mod & KMOD_CTRL)) {
+    } else if ((k->keysym.mod & CMD_ALT) && !(k->keysym.mod & KMOD_CTRL)) {
         int i = menu_with_hotkey(sym);
         if (i >= 0)
             menu_open(&a->menu, i);
@@ -1992,8 +2000,8 @@ void app_event(App *a, const SDL_Event *e)
         a->alt_tap = 0;
         break;
     case SDL_TEXTINPUT:
-        /* Ctrl/Alt chords are commands, not text (AltGr is allowed) */
-        if (mod_state() & (KMOD_CTRL | KMOD_LALT))
+        /* Ctrl/Alt chords are commands, not text */
+        if (mod_state() & (KMOD_CTRL | CMD_ALT))
             break;
         wake_cursor(a);
         if (a->dlg.kind != DLG_NONE)
