@@ -4,13 +4,13 @@
 
 <p align="center"><b>Classic Text Editor</b></p>
 
-cedit is a small, fast text editor that looks and feels like the text-mode
-editors of the 80s and 90s.
-
 <p>
   <img src="docs/screenshot.png" alt="cedit" width="49%">
   <img src="docs/screenshot-dark.png" alt="cedit in dark mode" width="49%">
 </p>
+
+cedit is a small, fast text editor that looks and feels like the text-mode
+editors of the 80s and 90s.
 
 It borrows from two places:
 
@@ -74,18 +74,11 @@ A few keys to get started:
 | `Ctrl+-` / `Ctrl+=` | Smaller / larger text |
 | `Ctrl+Q` | Quit |
 
+On macOS, `Cmd` works as `Ctrl` as well, except where the system's own
+application menu answers first.
+
 Settings such as dark mode and text size are changed from the View and Edit
 menus, and cedit remembers them in `~/.config/cedit/cedit.conf`.
-
-On macOS, `Cmd` works as `Ctrl` as well, except where the system's own
-application menu answers first: `Cmd+Q` and `Cmd+W` exit (asking to save, as
-`Ctrl+Q` does), and `Cmd+H` hides the app. Use `Ctrl+W` and `Ctrl+H` for Close
-Window and Replace. Both `Option` keys type characters, as elsewhere on the
-Mac, so the menu bar opens with `F10` or a tap of `Option`, and a dialog's
-buttons with `Tab` or, once the focus is off the text fields, their underlined
-letter. macOS also takes `Ctrl+arrows` for Mission Control and Spaces by
-default, so word moves and scrolling with them need those shortcuts turned off
-in System Settings → Keyboard → Keyboard Shortcuts.
 
 ## License
 
