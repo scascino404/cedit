@@ -5,16 +5,12 @@
 <p align="center"><b>Classic Text Editor</b></p>
 
 cedit is a small, fast text editor that looks and feels like the text-mode
-editors of the 80s and 90s. It has a menu bar, double-line window frames, a
-blinking block cursor, the 16 VGA colors, and fonts and a mouse pointer drawn
-by hand, pixel by pixel.
+editors of the 80s and 90s.
 
 <p>
   <img src="docs/screenshot.png" alt="cedit" width="49%">
   <img src="docs/screenshot-dark.png" alt="cedit in dark mode" width="49%">
 </p>
-
-## Inspiration
 
 cedit borrows from two places:
 
@@ -25,18 +21,14 @@ cedit borrows from two places:
   from the keyboard, simple dialog boxes, and no modes to learn: you open
   it and type.
 
-What it adds on top is speed. A 1 GB file opens instantly and stays smooth to
-scroll, edit, search and save.
-
 ## Features
 
-- Plain typing with the usual `Ctrl` shortcuts. No modes to learn.
+- Plain typing with the usual `Ctrl` shortcuts.
 - Huge files open at once and never freeze the editor.
 - Split windows, showing different files or the same file in two places.
 - Syntax highlighting for C, C++, Python, Shell, Makefile, JavaScript,
   TypeScript, JSON, Go, Rust, Lua and Markdown.
 - Light and dark themes, three text sizes, word wrap and line numbers.
-- Written in C89 with SDL2 as its only dependency.
 
 ## Build
 
