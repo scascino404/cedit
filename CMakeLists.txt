@@ -61,7 +61,7 @@ foreach(t test_buffer test_editor test_window test_syntax)
     add_test(NAME ${t} COMMAND ${t})
 endforeach()
 
-# drives the real UI headlessly (SDL's offscreen video driver)
+# drives the real UI headlessly (SDL's dummy video driver)
 add_executable(test_ui tests/test_ui.c)
 target_link_libraries(test_ui PRIVATE cedit_ui cedit_warnings)
 add_test(NAME test_ui COMMAND test_ui)

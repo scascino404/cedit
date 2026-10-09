@@ -1,7 +1,7 @@
 /*
  * uishot.c - drives the real UI headlessly and saves screenshots, for
  * checking the look without a display.
- *   SDL_VIDEODRIVER=offscreen uishot out-prefix file [script]
+ *   SDL_VIDEODRIVER=dummy uishot out-prefix file [script]
  * Script tokens: k:<keyname>[+shift|+ctrl|+alt] t:<text> c:<col>,<row> (click)
  *                d:<col>,<row> (double click) r:<col>,<row> (right click)
  *                w:<n> (wheel) s (screenshot)

@@ -393,8 +393,10 @@ int main(void)
     char *argv[2];
 
     putenv("CEDIT_CONFIG=");
+    /* not offscreen: on macOS SDL gives its windows OpenGL there, which
+     * it then can't load (no EGL), and dummy draws the same */
     if (!getenv("SDL_VIDEODRIVER"))
-        putenv("SDL_VIDEODRIVER=offscreen");
+        putenv("SDL_VIDEODRIVER=dummy");
     make_file();
     argv[0] = "test_ui";
     argv[1] = NULL;
