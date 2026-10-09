@@ -14,6 +14,7 @@ typedef struct Config {
     int tab_width;
     int highlight;      /* syntax highlighting */
     int indent_spaces;  /* Tab inserts spaces */
+    int word_wrap;
 } Config;
 
 /* Fills c with the defaults, then whatever the config file overrides. */

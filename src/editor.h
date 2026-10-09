@@ -21,6 +21,7 @@ typedef struct EdOptions {
     int autoindent;         /* Enter copies the leading whitespace */
     int tabw;
     int spaces;             /* Tab inserts spaces instead of a tab */
+    int wrap;               /* word wrap: long lines go on in more rows */
     char find[256];
     char repl[256];
     int icase;
@@ -59,6 +60,7 @@ struct Editor {
     long want;              /* wanted display column (Vim's w_curswant), -1 none */
 
     long top;               /* first visible line */
+    long top_row;           /* with word wrap: its first visible row */
     long left;              /* first visible display column */
     int view_w, view_h;     /* text area size, set by the UI */
     int follow;             /* scroll to the cursor on next draw */
@@ -92,6 +94,31 @@ const char *ed_line(Editor *ed, long ln, size_t *len);
 long ed_disp_col(const Editor *ed, const char *s, size_t len, size_t col);
 size_t ed_byte_col(const Editor *ed, const char *s, size_t len, long dcol);
 
+/*
+ * Word wrap. A line shows as rows of at most ed_wrap_width display columns,
+ * broken after the last space that fits, or between characters if none
+ * does. The column after them holds the wrap mark, or the cursor at the end
+ * of the line. Tabs align within their row. Without word wrap, a line is
+ * one row.
+ */
+int ed_wrap_width(const Editor *ed);
+/* The end of the row that starts at byte start: the next row's start, or
+ * len for the last row. */
+size_t ed_row_end(const Editor *ed, const char *s, size_t len, size_t start);
+/* The start of row `row` of a line (of its last row if it has fewer). */
+size_t ed_row_start(const Editor *ed, const char *s, size_t len, long row);
+/* The row that byte col shows in, and that row's start. A position at a
+ * row's end shows at the start of the next one. */
+long ed_row_of(const Editor *ed, const char *s, size_t len, size_t col, size_t *start);
+/* The cursor's place in the text area: its row from the top and display
+ * column from the left. A cursor line above or below the view gives a row
+ * of -1 or view_h. */
+void ed_cursor_spot(Editor *ed, long *row, long *x);
+/* The position shown at a row and display column of the text area. Past
+ * the end of a wrapped row it is before the row's last character. */
+void ed_pos_at(Editor *ed, long row, long x, long *ln, size_t *col);
+
+/* Up and Down go by rows, Page Up and Page Down by screens of rows. */
 void ed_move(Editor *ed, int how, int extend);
 void ed_set_cursor(Editor *ed, long ln, size_t col, int extend);
 void ed_select_all(Editor *ed);
@@ -101,8 +128,13 @@ void ed_clear_selection(Editor *ed);
 /* Ordered selection bounds; returns 0 if there is no (non-empty) selection. */
 int ed_sel_range(const Editor *ed, long *sy, size_t *sx, long *ey, size_t *ex);
 int ed_has_selection(const Editor *ed);
-void ed_scroll(Editor *ed, long lines);
+/* Scrolls by rows (lines without word wrap), and keeps the view in the
+ * document. */
+void ed_scroll(Editor *ed, long rows);
 void ed_scroll_to_cursor(Editor *ed);
+/* Scrolls so the cursor shows at a row of the text area, if the document
+ * reaches up that far. */
+void ed_scroll_cursor_to(Editor *ed, long row);
 
 /* `now` is a millisecond clock used to group typing into undo steps. */
 void ed_type(Editor *ed, const char *s, size_t n, unsigned long now);

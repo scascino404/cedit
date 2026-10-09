@@ -74,6 +74,7 @@ Settings are changed from the menus and remembered across sessions in
 | Text size | View → Small / Medium / Large Text | Medium |
 | Dark mode | View → Dark Mode | off |
 | Line numbers | View → Line Numbers | off |
+| Word wrap (long lines go on in the next rows, marked `↵`) | View → Word Wrap | on |
 | Tab width | View → Tab Width 4 / 8 | 4 |
 | Auto indent (Enter copies the line's leading whitespace) | Edit → Auto Indent | off |
 | Indent with spaces (Tab inserts spaces up to the next tab stop) | Edit → Indent with Spaces | off |

@@ -193,6 +193,68 @@ int main(void)
     ed_backspace(&ed, 0, t += 2000);
     EXPECT(&ed, "\xc3\xa9t");
 
+    /* word wrap: rows of 10 columns, broken after a space or else anywhere */
+    opt.wrap = 1;
+    open_text(&ed, "aaaa bbbbbbbbbbbbbbbb\nx\n");
+    ed.view_w = 11;
+    ed.view_h = 3;
+    {
+        size_t len, start;
+        const char *l = ed_line(&ed, 0, &len);
+        long row, x, ln;
+        CHECK(ed_wrap_width(&ed) == 10);
+        CHECK(ed_row_end(&ed, l, len, 0) == 5);
+        CHECK(ed_row_end(&ed, l, len, 5) == 15);
+        CHECK(ed_row_end(&ed, l, len, 15) == len);
+        CHECK(ed_row_of(&ed, l, len, 5, &start) == 1 && start == 5);
+        CHECK(ed_row_of(&ed, l, len, len, &start) == 2 && start == 15);
+        CHECK(ed_row_start(&ed, l, len, 9) == 15);
+
+        /* Up and Down go by rows, keeping the column */
+        ed_set_cursor(&ed, 0, 2, 0);
+        ed_move(&ed, MV_DOWN, 0);
+        CHECK(ed.cy == 0 && ed.cx == 7);
+        ed_move(&ed, MV_DOWN, 0);
+        CHECK(ed.cy == 0 && ed.cx == 17);
+        ed_move(&ed, MV_DOWN, 0);
+        CHECK(ed.cy == 1 && ed.cx == 1);
+        ed_move(&ed, MV_UP, 0);
+        CHECK(ed.cy == 0 && ed.cx == 17);
+        /* past a wrapped row's end: before its last character */
+        ed_set_cursor(&ed, 0, 13, 0);
+        ed_move(&ed, MV_UP, 0);
+        CHECK(ed.cx == 4);
+
+        /* 5 rows; the last one stays at the bottom of 3 */
+        ed.top = ed.top_row = 0;
+        ed_scroll(&ed, 1);
+        CHECK(ed.top == 0 && ed.top_row == 1);
+        ed_scroll(&ed, 10);
+        CHECK(ed.top == 0 && ed.top_row == 2);
+        ed_scroll(&ed, -1);
+        CHECK(ed.top == 0 && ed.top_row == 1);
+
+        /* the cursor's row counts the rows above it */
+        ed.top = ed.top_row = 0;
+        ed_set_cursor(&ed, 2, 0, 0);
+        ed_scroll_to_cursor(&ed);
+        CHECK(ed.top == 0 && ed.top_row == 2);
+        ed_cursor_spot(&ed, &row, &x);
+        CHECK(row == 2 && x == 0);
+
+        /* cells to positions */
+        ed_pos_at(&ed, 0, 20, &ln, &start);
+        CHECK(ln == 0 && start == len);
+        ed.top_row = 0;
+        ed_pos_at(&ed, 0, 9, &ln, &start);
+        CHECK(ln == 0 && start == 4);
+        ed_pos_at(&ed, 1, 1, &ln, &start);
+        CHECK(ln == 0 && start == 6);
+    }
+    opt.wrap = 0;
+    ed.view_w = 80;
+    ed.view_h = 25;
+
     /* a second view keeps its place while the first one edits */
     open_text(&ed, "one\ntwo\nthree\n");
     ed_set_cursor(&ed, 1, 1, 0);

@@ -190,12 +190,12 @@ static void cursor_cell(App *a, int *cx, int *cy)
 {
     TextArea ta = text_area(a, a->win);
     Editor *ed = &a->win->ed;
-    size_t len;
-    const char *l = ed_line(ed, ed->cy, &len);
+    long row, x;
 
     ed_scroll_to_cursor(ed);
-    *cx = ta.x + (int)(ed_disp_col(ed, l, len, ed->cx) - ed->left);
-    *cy = ta.y + (int)(ed->cy - ed->top);
+    ed_cursor_spot(ed, &row, &x);
+    *cx = ta.x + (int)x;
+    *cy = ta.y + (int)row;
 }
 
 /* Sets a->dir to the current file's directory, or to the working directory
@@ -796,6 +796,7 @@ static void do_find(App *a, int backward)
 {
     Editor *ed = &a->win->ed;
     int r, h;
+    long row, x;
     if (!a->opt.find[0]) {
         find_dialog(a, 0);
         return;
@@ -811,11 +812,9 @@ static void do_find(App *a, int backward)
     /* keep matches in the upper part, above a find/replace dialog */
     h = sync_view(a, a->win).h;
     ed_scroll_to_cursor(ed);
-    if (ed->cy < ed->top || ed->cy > ed->top + h / 2) {
-        ed->top = ed->cy - h / 3;
-        if (ed->top < 0)
-            ed->top = 0;
-    }
+    ed_cursor_spot(ed, &row, &x);
+    if (row > h / 2)
+        ed_scroll_cursor_to(ed, h / 3);
 }
 
 /* Acts on a dialog button (ID_CANCEL also stands for Escape). */
@@ -932,6 +931,7 @@ static void save_settings(App *a)
     c.tab_width = a->opt.tabw;
     c.highlight = a->highlight;
     c.indent_spaces = a->opt.spaces;
+    c.word_wrap = a->opt.wrap;
     config_save(&c);
 }
 
@@ -986,6 +986,8 @@ static int cmd_checked(App *a, int cmd)
         return a->scr.size == SIZE_LARGE;
     case CMD_LINENUM:
         return a->show_lnum;
+    case CMD_WRAP:
+        return a->opt.wrap;
     case CMD_TAB4:
         return a->opt.tabw == 4;
     case CMD_TAB8:
@@ -1053,6 +1055,15 @@ static void command(App *a, int cmd)
         follow_all(a);
         save_settings(a);
         break;
+    case CMD_WRAP:
+        a->opt.wrap = !a->opt.wrap;
+        for (w = win_first(a->root); w; w = win_next(w)) {
+            w->ed.left = 0;
+            ed_scroll(&w->ed, 0);       /* into the rows, or lines, there are */
+        }
+        follow_all(a);
+        save_settings(a);
+        break;
     case CMD_TAB4:
     case CMD_TAB8:
         a->opt.tabw = cmd == CMD_TAB4 ? 4 : 8;
@@ -1115,38 +1126,49 @@ static void menu_command(App *a, int cmd)
 /* drawing                                                             */
 /* ------------------------------------------------------------------ */
 
+/* Is byte i of line ln in the selection from (sy, sx) to (ey, ex)? */
+static int in_sel(long ln, size_t i, long sy, size_t sx, long ey, size_t ex)
+{
+    return (ln > sy || (ln == sy && i >= sx)) && (ln < ey || (ln == ey && i < ex));
+}
+
 static void draw_text(App *a, Window *w, TextArea ta)
 {
     Screen *s = &a->scr;
     Editor *ed = &w->ed;
     const Theme *th = a->theme;
-    long nlines = ed_lines(ed), row, sy = 0, ey = 0;
-    size_t sx = 0, ex = 0;
+    long nlines = ed_lines(ed), row, ln = ed->top, sy = 0, ey = 0;
+    size_t sx = 0, ex = 0, len = 0, start = 0;
+    const char *l = NULL;
+    const unsigned char *cls = NULL;
     int have_sel = ed_sel_range(ed, &sy, &sx, &ey, &ex);
+    int mark_x = ed_wrap_width(ed), new_line = 1;
 
-    for (row = 0; row < ta.h; row++) {
-        long ln = ed->top + row, d = 0;
-        size_t len, i = 0;
-        const char *l;
-        const unsigned char *cls;
+    /* a row at a time: a line without word wrap, or a part of one */
+    for (row = 0; row < ta.h && ln < nlines; row++) {
+        long d = 0;
+        size_t i, end;
         int y = ta.y + (int)row;
 
-        if (ln >= nlines)
-            break;
-        if (ta.gutter) {
+        if (new_line) {
+            cls = a->highlight ? hl_line(doc_hl(ed), ln) : NULL;
+            l = ed_line(ed, ln, &len);
+            if (row == 0)
+                start = ed_row_start(ed, l, len, ed->top_row);
+            new_line = 0;
+        }
+        if (ta.gutter && start == 0) {
             char num[32];
             int n = sprintf(num, "%ld", ln + 1);
             screen_puts(s, ta.x - 1 - n, y, num, ln == ed->cy ? th->cur_lnum : th->lnum,
                         th->text_bg, n);
         }
-        cls = a->highlight ? hl_line(doc_hl(ed), ln) : NULL;
-        l = ed_line(ed, ln, &len);
-        while (i < len && d < ed->left + ta.w) {
+        end = ed_row_end(ed, l, len, start);
+        for (i = start; i < end && d < ed->left + ta.w;) {
             unsigned long cp;
             size_t k;
             long width, c;
-            int fg, bg, sel = have_sel && (ln > sy || (ln == sy && i >= sx)) &&
-                                  (ln < ey || (ln == ey && i < ex));
+            int fg, bg, sel = have_sel && in_sel(ln, i, sy, sx, ey, ex);
             if (l[i] == '\t') {
                 width = ed->opt->tabw - d % ed->opt->tabw;
                 cp = ' ';
@@ -1173,20 +1195,33 @@ static void draw_text(App *a, Window *w, TextArea ta)
             d += width;
             i += k;
         }
+        if (end < len) {
+            /* the line goes on in the next row: the wrap mark, selected
+             * when the selection goes on too */
+            int sel = have_sel && in_sel(ln, end - 1, sy, sx, ey, ex) &&
+                      in_sel(ln, end, sy, sx, ey, ex);
+            if (mark_x < ta.w)
+                screen_put(s, ta.x + mark_x, y, 0x21B5, sel ? th->sel_fg : th->lnum,
+                           sel ? th->sel_bg : th->text_bg);
+            start = end;
+            continue;
+        }
         /* selected line break */
         if (have_sel && ln >= sy && ln < ey && i >= len && d >= ed->left &&
             d < ed->left + ta.w && (ln > sy || len >= sx))
             screen_put(s, ta.x + (int)(d - ed->left), y, ' ', th->sel_fg, th->sel_bg);
+        ln++;
+        start = 0;
+        new_line = 1;
     }
 
     /* text cursor, only in the focused window */
     if (w == a->win && a->dlg.kind == DLG_NONE && a->menu.open < 0 &&
-        (a->blink_on || !a->focused) && ed->cy >= ed->top && ed->cy < ed->top + ta.h) {
-        size_t len;
-        const char *l = ed_line(ed, ed->cy, &len);
-        long dc = ed_disp_col(ed, l, len, ed->cx) - ed->left;
-        if (dc >= 0 && dc < ta.w)
-            screen_cursor(s, ta.x + (int)dc, ta.y + (int)(ed->cy - ed->top),
+        (a->blink_on || !a->focused)) {
+        long r, x;
+        ed_cursor_spot(ed, &r, &x);
+        if (r >= 0 && r < ta.h && x >= 0 && x < ta.w)
+            screen_cursor(s, ta.x + (int)x, ta.y + (int)r,
                           ed->opt->overwrite ? TCUR_OVERWRITE : TCUR_INSERT);
     }
 }
@@ -1322,16 +1357,7 @@ void app_draw(App *a)
 static void cell_to_pos(App *a, int cx, int cy, long *ln, size_t *col)
 {
     TextArea ta = text_area(a, a->win);
-    Editor *ed = &a->win->ed;
-    size_t len;
-    const char *l;
-    *ln = ed->top + (cy - ta.y);
-    if (*ln < 0)
-        *ln = 0;
-    if (*ln >= ed_lines(ed))
-        *ln = ed_lines(ed) - 1;
-    l = ed_line(ed, *ln, &len);
-    *col = ed_byte_col(ed, l, len, ed->left + (cx - ta.x));
+    ed_pos_at(&a->win->ed, cy - ta.y, cx - ta.x, ln, col);
 }
 
 static void scrollbar_click(App *a, int cy, TextArea ta)
@@ -1370,6 +1396,7 @@ static void scrollbar_drag(App *a, int cy)
     /* round up, so scrollbar_geometry's rounding down puts the thumb back
      * under the pointer */
     ed->top = ((long)tpos * range + track - tlen - 1) / (track - tlen);
+    ed->top_row = 0;
     ed_scroll(ed, 0);
 }
 
@@ -1535,7 +1562,7 @@ static void mouse_wheel(App *a, const SDL_MouseWheelEvent *w)
     }
     if (dy)
         ed_scroll(ed, -dy * 3);
-    if (dx) {
+    if (dx && !a->opt.wrap) {
         ed->left -= dx * 4;
         if (ed->left < 0)
             ed->left = 0;
@@ -1547,12 +1574,10 @@ static void mouse_wheel(App *a, const SDL_MouseWheelEvent *w)
 static void focus_toward(App *a, int dx, int dy)
 {
     TextArea ta = text_area(a, a->win);
-    Editor *ed = &a->win->ed;
-    size_t len;
-    const char *l = ed_line(ed, ed->cy, &len);
-    long col = ed_disp_col(ed, l, len, ed->cx) - ed->left, row = ed->cy - ed->top;
+    long row, col;
     Window *w;
 
+    ed_cursor_spot(&a->win->ed, &row, &col);
     col = col < 0 ? 0 : col >= ta.w ? ta.w - 1 : col;
     row = row < 0 ? 0 : row >= ta.h ? ta.h - 1 : row;
     w = win_neighbor(a->root, a->win, dx, dy, ta.x + (int)col, ta.y + (int)row);
@@ -1828,6 +1853,7 @@ int app_init(App *a, int argc, char **argv)
     a->opt.autoindent = cfg.autoindent;
     a->opt.tabw = cfg.tab_width;
     a->opt.spaces = cfg.indent_spaces;
+    a->opt.wrap = cfg.word_wrap;
     a->root = a->win = win_new(&a->opt);
     a->show_lnum = cfg.line_numbers;
     a->dark = cfg.dark;

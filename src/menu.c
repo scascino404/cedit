@@ -55,6 +55,7 @@ static const MenuItem m_view[] = {
     {NULL, NULL, 0},
     {"&Dark Mode", "", CMD_DARK},
     {"Line N&umbers", "Ctrl+L", CMD_LINENUM},
+    {"&Word Wrap", "", CMD_WRAP},
     {"Syntax &Highlighting", "", CMD_HIGHLIGHT},
     {"Tab Width &4", "", CMD_TAB4},
     {"Tab Width &8", "", CMD_TAB8},

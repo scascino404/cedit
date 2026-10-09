@@ -5,8 +5,8 @@ editor. The most noticeable gaps come first; the rest are grouped by area.
 
 ## Most likely to be noticed
 
-- **No word wrap.** Long lines scroll horizontally. There is also no
-  horizontal scrollbar, only the mouse wheel with `Shift` and the cursor.
+- **No horizontal scrollbar.** Without word wrap, long lines scroll
+  horizontally with only the mouse wheel with `Shift` and the cursor.
 - **No tabs or file tree.** Windows can be split to show several files, or
   one file in several places, but a file is open only while a window shows
   it: opening a file replaces the one in the focused window (after asking to
@@ -89,7 +89,12 @@ editor. The most noticeable gaps come first; the rest are grouped by area.
   can't be customized.
 - Very long single lines (tens of MB with no newline) get slow to edit near
   their start, and the screen has to scan from the line start to the visible
-  column.
+  column. With word wrap, scrolling through such a line rewraps it from its
+  start at each row.
+- Word wrap breaks only at spaces and tabs (or anywhere in a word too long
+  for a row), with no hyphenation and no indent for the continued rows.
+  `Home` and `End` go to the line's ends, not the row's, and the scrollbar
+  counts lines, not rows.
 
 ## Input and platform
 

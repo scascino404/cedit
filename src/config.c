@@ -14,7 +14,7 @@
 enum { BOOL, INT, SIZE };
 
 /* Adding a setting: a field in Config, a default and a row here. */
-static const Config defaults = {SIZE_MEDIUM, 0, 0, 0, 4, 1, 0};
+static const Config defaults = {SIZE_MEDIUM, 0, 0, 0, 4, 1, 0, 1};
 
 static const struct {
     const char *key;
@@ -27,7 +27,8 @@ static const struct {
     {"line_numbers", offsetof(Config, line_numbers), BOOL},
     {"tab_width", offsetof(Config, tab_width), INT},
     {"highlight", offsetof(Config, highlight), BOOL},
-    {"indent_spaces", offsetof(Config, indent_spaces), BOOL}
+    {"indent_spaces", offsetof(Config, indent_spaces), BOOL},
+    {"word_wrap", offsetof(Config, word_wrap), BOOL}
 };
 #define NKEYS (sizeof keys / sizeof keys[0])
 

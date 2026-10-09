@@ -84,6 +84,7 @@ void ed_init_view(Editor *ed, const Editor *from)
     ed->ax = from->ax;
     ed->want = from->want;
     ed->top = from->top;
+    ed->top_row = from->top_row;
     ed->left = from->left;
     ed->view_w = from->view_w;
     ed->view_h = from->view_h;
@@ -113,6 +114,7 @@ static void reset_view(Editor *ed)
     ed->sel = 0;
     ed->want = -1;
     ed->top = ed->left = 0;
+    ed->top_row = 0;
     ed->moved = 1;
     ed->follow = 1;
 }
@@ -255,6 +257,145 @@ size_t ed_byte_col(const Editor *ed, const char *s, size_t len, long dcol)
         i = utf8_next(s, len, i);
     }
     return i;
+}
+
+/* ------------------------------------------------------------------ */
+/* rows (word wrap)                                                    */
+/* ------------------------------------------------------------------ */
+
+int ed_wrap_width(const Editor *ed)
+{
+    return ed->view_w > 2 ? ed->view_w - 1 : 1;
+}
+
+size_t ed_row_end(const Editor *ed, const char *s, size_t len, size_t start)
+{
+    size_t i = start, brk = start;
+    long x = 0, w = ed_wrap_width(ed), tabw = ed->opt->tabw;
+
+    if (!ed->opt->wrap)
+        return len;
+    while (i < len) {
+        long cw = s[i] == '\t' ? tabw - x % tabw : 1;
+        if (x + cw > w && i > start)
+            return brk > start ? brk : i;
+        x += cw;
+        if (s[i] == ' ' || s[i] == '\t')
+            brk = ++i;
+        else
+            i = utf8_next(s, len, i);
+    }
+    return len;
+}
+
+size_t ed_row_start(const Editor *ed, const char *s, size_t len, long row)
+{
+    size_t start = 0, end;
+    while (row-- > 0 && (end = ed_row_end(ed, s, len, start)) < len)
+        start = end;
+    return start;
+}
+
+long ed_row_of(const Editor *ed, const char *s, size_t len, size_t col, size_t *start)
+{
+    size_t a = 0, b;
+    long row = 0;
+    while ((b = ed_row_end(ed, s, len, a)) < len && col >= b) {
+        a = b;
+        row++;
+    }
+    *start = a;
+    return row;
+}
+
+static long line_rows(Editor *ed, long ln)
+{
+    size_t len, start;
+    const char *l = ed_line(ed, ln, &len);
+    return ed_row_of(ed, l, len, len, &start) + 1;
+}
+
+/* Moves the row position (*ln, *row) n rows down, or up if n < 0, as far
+ * as the document goes. Returns how many rows it moved. */
+static long step_rows(Editor *ed, long *ln, long *row, long n)
+{
+    long moved = 0, last = ed_lines(ed) - 1;
+    for (; n > 0; n--, moved++) {
+        if (*row + 1 < line_rows(ed, *ln))
+            (*row)++;
+        else if (*ln < last) {
+            (*ln)++;
+            *row = 0;
+        } else
+            break;
+    }
+    for (; n < 0; n++, moved--) {
+        if (*row > 0)
+            (*row)--;
+        else if (*ln > 0) {
+            (*ln)--;
+            *row = line_rows(ed, *ln) - 1;
+        } else
+            break;
+    }
+    return moved;
+}
+
+/* Keeps the top line in the document and its row in the line. */
+static void fix_top(Editor *ed)
+{
+    long rows;
+    if (ed->top >= ed_lines(ed))
+        ed->top = ed_lines(ed) - 1;
+    if (ed->top < 0)
+        ed->top = 0;
+    if (!ed->opt->wrap) {
+        ed->top_row = 0;
+        return;
+    }
+    rows = line_rows(ed, ed->top);
+    if (ed->top_row >= rows)
+        ed->top_row = rows - 1;
+    if (ed->top_row < 0)
+        ed->top_row = 0;
+}
+
+void ed_cursor_spot(Editor *ed, long *row, long *x)
+{
+    size_t len, start;
+    const char *l = ed_line(ed, ed->cy, &len);
+    long crow = ed_row_of(ed, l, len, ed->cx, &start), ln;
+
+    *x = ed_disp_col(ed, l + start, len - start, ed->cx - start) - ed->left;
+    fix_top(ed);
+    if (ed->cy < ed->top) {
+        *row = -1;
+    } else if (ed->cy - ed->top >= ed->view_h) {
+        *row = ed->view_h;
+    } else {
+        /* a line takes at least a row, so this counts fewer than view_h */
+        *row = crow - ed->top_row;
+        for (ln = ed->top; ln < ed->cy; ln++)
+            *row += line_rows(ed, ln);
+    }
+}
+
+void ed_pos_at(Editor *ed, long row, long x, long *ln, size_t *col)
+{
+    size_t len, start, end;
+    const char *l;
+    long r;
+
+    fix_top(ed);
+    *ln = ed->top;
+    r = ed->top_row;
+    step_rows(ed, ln, &r, row);
+    l = ed_line(ed, *ln, &len);
+    start = ed_row_start(ed, l, len, r);
+    end = ed_row_end(ed, l, len, start);
+    *col = start + ed_byte_col(ed, l + start, end - start, ed->left + x);
+    if (*col == end && end < len)
+        *col = utf8_prev(l, end);
 }
 
 /* ------------------------------------------------------------------ */
@@ -414,25 +555,23 @@ void ed_move(Editor *ed, int how, int extend)
     case MV_PGDN: {
         long d = how == MV_UP ? -1 : how == MV_DOWN ? 1
                : (how == MV_PGUP ? -1 : 1) * (ed->view_h > 2 ? ed->view_h - 1 : 1);
+        size_t start, end;
+        long row = ed_row_of(ed, l, len, ed->cx, &start);
         if (ed->want < 0)
-            ed->want = ed_disp_col(ed, l, len, ed->cx);
+            ed->want = ed_disp_col(ed, l + start, len - start, ed->cx - start);
         if (how == MV_PGUP || how == MV_PGDN)
             ed_scroll(ed, d);
-        if (how == MV_UP && ed->cy == 0) {
-            ed->cx = 0;
+        /* Up on the first row goes to the start, Down on the last to the end */
+        if (!step_rows(ed, &ed->cy, &row, d) && (how == MV_UP || how == MV_DOWN)) {
+            ed->cx = how == MV_UP ? 0 : len;
             break;
         }
-        if (how == MV_DOWN && ed->cy == n - 1) {
-            ed->cx = len;
-            break;
-        }
-        ed->cy += d;
-        if (ed->cy < 0)
-            ed->cy = 0;
-        if (ed->cy >= ed_lines(ed))
-            ed->cy = ed_lines(ed) - 1;
         l = ed_line(ed, ed->cy, &len);
-        ed->cx = ed_byte_col(ed, l, len, ed->want);
+        start = ed_row_start(ed, l, len, row);
+        end = ed_row_end(ed, l, len, start);
+        ed->cx = start + ed_byte_col(ed, l + start, end - start, ed->want);
+        if (ed->cx == end && end < len)
+            ed->cx = utf8_prev(l, end);
         break;
     }
     case MV_DOCSTART:
@@ -504,14 +643,41 @@ void ed_clear_selection(Editor *ed)
     ed->sel = 0;
 }
 
-void ed_scroll(Editor *ed, long lines)
+void ed_scroll(Editor *ed, long rows)
 {
-    long max = ed_lines(ed) - ed->view_h;
-    ed->top += lines;
-    if (ed->top > max)
+    long max = ed_lines(ed) - ed->view_h, mrow;
+
+    if (!ed->opt->wrap) {
+        ed->top += rows;
+        if (ed->top > max)
+            ed->top = max;
+        if (ed->top < 0)
+            ed->top = 0;
+        ed->top_row = 0;
+        return;
+    }
+    fix_top(ed);
+    step_rows(ed, &ed->top, &ed->top_row, rows);
+    /* the last row stays at the bottom, or below it; with view_h lines
+     * below the top, it is */
+    if (ed->top <= max)
+        return;
+    max = ed_lines(ed) - 1;
+    mrow = line_rows(ed, max) - 1;
+    step_rows(ed, &max, &mrow, -(ed->view_h - 1));
+    if (ed->top > max || (ed->top == max && ed->top_row > mrow)) {
         ed->top = max;
-    if (ed->top < 0)
-        ed->top = 0;
+        ed->top_row = mrow;
+    }
+}
+
+void ed_scroll_cursor_to(Editor *ed, long row)
+{
+    size_t len, start;
+    const char *l = ed_line(ed, ed->cy, &len);
+    ed->top = ed->cy;
+    ed->top_row = ed_row_of(ed, l, len, ed->cx, &start);
+    step_rows(ed, &ed->top, &ed->top_row, -row);
 }
 
 void ed_scroll_to_cursor(Editor *ed)
@@ -521,6 +687,18 @@ void ed_scroll_to_cursor(Editor *ed)
     long d, h = ed->view_h > 0 ? ed->view_h : 1, w = ed->view_w > 0 ? ed->view_w : 1;
 
     clamp(ed);
+    if (ed->opt->wrap) {
+        long row, x;
+        ed_cursor_spot(ed, &row, &x);
+        ed->left = 0;
+        /* far jumps put the cursor a third of the way down */
+        if (row < 0)
+            ed_scroll_cursor_to(ed, ed->top - ed->cy > h ? h / 3 : 0);
+        else if (row >= h)
+            ed_scroll_cursor_to(ed, ed->cy - ed->top > 2 * h ? h / 3 : h - 1);
+        ed->follow = 0;
+        return;
+    }
     if (ed->cy < ed->top)
         ed->top = ed->top - ed->cy > h ? ed->cy - h / 3 : ed->cy;
     else if (ed->cy >= ed->top + h)
