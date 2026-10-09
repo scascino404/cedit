@@ -50,8 +50,8 @@ static const MenuItem m_search[] = {
 };
 static const MenuItem m_view[] = {
     {"&Small Text", "", CMD_SIZE_S},
-    {"&Medium Text", "", CMD_SIZE_M},
-    {"&Large Text", "Ctrl+0", CMD_SIZE_L},
+    {"&Medium Text", "Ctrl+0", CMD_SIZE_M},
+    {"&Large Text", "", CMD_SIZE_L},
     {NULL, NULL, 0},
     {"&Dark Mode", "", CMD_DARK},
     {"Line N&umbers", "Ctrl+L", CMD_LINENUM},

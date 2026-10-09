@@ -103,6 +103,21 @@ static const char *const tc_overwrite8[8] = {
     "########"
 };
 
+static const char *const tc_overwrite12[12] = {
+    "############",
+    "############",
+    "##........##",
+    "##........##",
+    "##........##",
+    "##........##",
+    "##........##",
+    "##........##",
+    "##........##",
+    "##........##",
+    "############",
+    "############"
+};
+
 static const char *const tc_overwrite20[20] = {
     "####################",
     "####################",
@@ -136,7 +151,8 @@ unsigned long text_cursor_row(int shape, int h, int y)
         return 0xFFFFFFFFUL;
     if (shape != TCUR_OVERWRITE || y < 0 || y >= h)
         return 0;
-    row = h == 20 ? tc_overwrite20[y] : tc_overwrite8[y];
+    row = h == 20 ? tc_overwrite20[y] : h == 12 ? tc_overwrite12[y]
+                                                : tc_overwrite8[y];
     for (x = 0; row[x]; x++)
         if (row[x] == '#')
             bits |= FONT_BIT(x);

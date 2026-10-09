@@ -14,7 +14,7 @@
 enum { BOOL, INT, SIZE };
 
 /* Adding a setting: a field in Config, a default and a row here. */
-static const Config defaults = {SIZE_LARGE, 0, 0, 0, 4, 1, 0};
+static const Config defaults = {SIZE_MEDIUM, 0, 0, 0, 4, 1, 0};
 
 static const struct {
     const char *key;
@@ -48,7 +48,7 @@ static int parse_value(int type, const char *val)
             if (strcmp(val, size_names[k]) == 0)
                 return k;
     if (type == SIZE && strcmp(val, "normal") == 0)
-        return SIZE_SMALL;      /* the old 8x16 size, same line height */
+        return SIZE_MEDIUM;     /* the old 8x16 size, same line height */
     return atoi(val);
 }
 

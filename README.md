@@ -71,7 +71,7 @@ Settings are changed from the menus and remembered across sessions in
 
 | Setting | Menu | Default |
 |---|---|---|
-| Text size | View → Small / Medium / Large Text | Large |
+| Text size | View → Small / Medium / Large Text | Medium |
 | Dark mode | View → Dark Mode | off |
 | Line numbers | View → Line Numbers | off |
 | Tab width | View → Tab Width 4 / 8 | 4 |
@@ -101,7 +101,7 @@ Settings are changed from the menus and remembered across sessions in
 | `Ctrl+H` | Replace (one at a time, or all at once) |
 | `Ctrl+G` | Go to line |
 | `Ctrl+-` / `Ctrl+=`, `Ctrl+wheel` | Smaller / larger text |
-| `Ctrl+0` | Default (large) text |
+| `Ctrl+0` | Default (medium) text |
 | `Ctrl+L` | Line numbers |
 | `F10` or tap `Alt`, `Alt+letter` | Menu bar |
 | `F1` | Keyboard help |
@@ -120,7 +120,7 @@ Settings are changed from the menus and remembered across sessions in
 | `src/theme.c` | The light and dark color themes |
 | `src/syntax.c` | Syntax highlighting: the rule-driven lexer, language detection, and the cache of lexer states at line starts |
 | `src/langs.c` | The language definitions: rules and word lists for each language |
-| `src/font8x8.c`, `src/font20x20.c` | The hand-drawn "Temple" font at 8×8 and 20×20, as ASCII art |
+| `src/font8x8.c`, `src/font12x12.c`, `src/font20x20.c` | The hand-drawn "Temple" font at 8×8, 12×12 and 20×20, as ASCII art |
 | `src/font.c` | Builds the glyph tables: box drawing from stroke rules, accented Latin-1 letters by composition |
 | `src/cursor.c` | Hand-drawn mouse pointers (the TempleOS arrow, I-beam, hourglass) and text cursor shapes |
 | `src/config.c` | Loads and saves the settings file, driven by one table of keys |
@@ -151,10 +151,9 @@ All sizes use the "Temple" font, drawn after TempleOS's 8×8 font. Like
 TempleOS's, its letters fill the cell with no gap between lines, so a
 screen holds many lines for the size of the letters.
 
-- **Small:** the 8×8 font doubled (16 px lines)
-- **Medium:** the same design redrawn at 2.5× as a 20×20 font (20 px
-  lines), which matches TempleOS full screen on a 1200-pixel-tall display
-- **Large** (the default): the 8×8 font tripled (24 px lines)
+- **Small:** the same design redrawn at 1.5× as a 12×12 font (12 px lines)
+- **Medium** (the default): the 8×8 font doubled (16 px lines)
+- **Large:** the 8×8 font tripled (24 px lines)
 
 All three are multiplied by the display's HiDPI factor, so the pixels stay
 crisp and square.
@@ -216,7 +215,7 @@ table in `src/theme.c`.
 
 ```sh
 make tools
-build/fontsheet 8 4 sheet.ppm             # render a font sample sheet (8 or 20)
+build/fontsheet 8 4 sheet.ppm             # render a font sample sheet (8, 12 or 20)
 SDL_VIDEODRIVER=offscreen build/uishot shot file.txt k:F10 s
                                           # drive the UI headlessly, save screenshots
                                           # (tokens are listed in tests/uishot.c)

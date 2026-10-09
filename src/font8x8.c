@@ -1,6 +1,7 @@
 /*
  * font8x8.c - cedit "Temple" 8x8 font, drawn by hand after TempleOS's
- * (public domain) font. font20x20.c is the same design at 2.5x.
+ * (public domain) font. font12x12.c and font20x20.c are the same design at
+ * 1.5x and 2.5x.
  *
  * Capitals use rows 0-6, lowercase x-height rows 2-6, descenders row 7.
  * Vertical strokes are 2 px wide, horizontal strokes 1 px. Accented

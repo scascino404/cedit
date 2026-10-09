@@ -1,6 +1,6 @@
 /*
  * fontsheet.c - renders a font's glyphs and a text sample to a PPM image, for
- * reviewing the hand-drawn fonts.  usage: fontsheet 8|20 scale out.ppm
+ * reviewing the hand-drawn fonts.  usage: fontsheet 8|12|20 scale out.ppm
  */
 #include "../src/font.h"
 #include "../src/utf8.h"
@@ -45,11 +45,12 @@ int main(int argc, char **argv)
     FILE *fp;
 
     if (argc != 4) {
-        fprintf(stderr, "usage: fontsheet 8|20 scale out.ppm\n");
+        fprintf(stderr, "usage: fontsheet 8|12|20 scale out.ppm\n");
         return 1;
     }
     font_init();
-    f = atoi(argv[1]) == 20 ? &font_20x20 : &font_8x8;
+    f = atoi(argv[1]) == 20 ? &font_20x20
+      : atoi(argv[1]) == 12 ? &font_12x12 : &font_8x8;
     scale = atoi(argv[2]);
     for (rows = 0; sample[rows]; rows++)
         ;

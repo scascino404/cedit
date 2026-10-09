@@ -8,6 +8,7 @@
 #include <string.h>
 
 Font font_8x8;
+Font font_12x12;
 Font font_20x20;
 
 #define MAX_GLYPHS 512
@@ -279,6 +280,7 @@ static void build(Font *f, int w, int h, const char *const *src,
 void font_init(void)
 {
     build(&font_8x8, 8, 8, font8x8_src, "font8x8", 0);
+    build(&font_12x12, 12, 12, font12x12_src, "font12x12", 0);
     build(&font_20x20, 20, 20, font20x20_src, "font20x20", 0);
 }
 

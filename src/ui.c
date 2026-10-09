@@ -59,7 +59,7 @@ static const char *const help_lines[] = {
     "Ctrl+Backspace / Ctrl+Del   Delete word",
     "",
     "Ctrl+- / Ctrl+=  Smaller / larger text (or Ctrl+wheel)",
-    "Ctrl+0  Default (large) text",
+    "Ctrl+0  Default (medium) text",
     "Ctrl+L  Line numbers",
     NULL
 };
@@ -1417,7 +1417,7 @@ static void editor_key(App *a, const SDL_KeyboardEvent *k)
         case SDLK_PLUS:
         case SDLK_KP_PLUS: set_size(a, a->scr.size + 1); return;
         case SDLK_0:
-        case SDLK_KP_0: set_size(a, SIZE_LARGE); return;
+        case SDLK_KP_0: set_size(a, SIZE_MEDIUM); return;
         case SDLK_UP: ed_scroll(ed, -1); return;
         case SDLK_DOWN: ed_scroll(ed, 1); return;
         }

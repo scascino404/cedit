@@ -81,7 +81,7 @@ editor. The most noticeable gaps come first; the rest are grouped by area.
   guides or minimap.
 - Double-width (CJK) and combining characters each take one cell, so
   alignment is off for such text. No right-to-left or bidirectional text.
-- One built-in bitmap font in three sizes (Small 8×8 doubled, Medium 20×20,
+- One built-in bitmap font in three sizes (Small 12×12, Medium 8×8 doubled,
   Large 8×8 tripled). There are no other fonts and no fractional sizes.
 - Two color themes (light and dark) on the fixed 16-color VGA palette. Colors
   can't be customized.

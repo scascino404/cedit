@@ -21,8 +21,8 @@ static const struct {
     const Font *font;
     int mult, ptr_mult;
 } sizes[SIZE_COUNT] = {
+    {&font_12x12, 1, 2},
     {&font_8x8, 2, 2},
-    {&font_20x20, 1, 2},
     {&font_8x8, 3, 3}
 };
 
