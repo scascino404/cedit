@@ -91,6 +91,12 @@ block()
     endforeach()
     FetchContent_MakeAvailable(SDL2)
 
+    # macOS: SDL links IOKit only for the subsystems above, but its Cocoa
+    # video code uses it too
+    if(APPLE)
+        target_link_libraries(SDL2-static INTERFACE "-framework IOKit")
+    endif()
+
     # SDL leaves out a window system whose development files are missing
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         get_directory_property(x11 DIRECTORY ${sdl2_SOURCE_DIR} DEFINITION HAVE_X11)
