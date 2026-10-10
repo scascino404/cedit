@@ -156,17 +156,11 @@ endif()
 
 # tests
 enable_testing()
-foreach(t test_buffer test_editor test_window test_syntax)
+foreach(t test_buffer test_editor test_window test_syntax test_save)
     add_executable(${t} tests/${t}.c)
     target_link_libraries(${t} PRIVATE cedit_core cedit_warnings)
     add_test(NAME ${t} COMMAND ${t})
 endforeach()
-if(WIN32)
-    # saving and opening files where Windows differs
-    add_executable(test_win32 tests/test_win32.c)
-    target_link_libraries(test_win32 PRIVATE cedit_core cedit_warnings)
-    add_test(NAME test_win32 COMMAND test_win32)
-endif()
 
 # drives the real UI headlessly (SDL's dummy video driver)
 add_executable(test_ui tests/test_ui.c)
