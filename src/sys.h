@@ -41,7 +41,9 @@ int sys_write(int fd, const SysChunk *c, int n);
 /* Puts what was written to fd on the disk. */
 int sys_sync(int fd);
 int sys_close(int fd);
-/* Puts file tmp in place of target, which keeps its permissions. */
+/* Puts file tmp in place of target, which keeps its permissions. Returns
+ * 1 (on Windows) when that failed with tmp left as the only copy of the
+ * text, which must then stay, as err says. */
 int sys_replace(const char *tmp, const char *target, char *err, size_t errlen);
 
 /* On Windows, turns the backslashes in path into slashes. */

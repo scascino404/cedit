@@ -984,7 +984,7 @@ int buf_save_step(BufSave *s, size_t budget)
 
 int buf_save_end(BufSave *s)
 {
-    int fd = s->fd, e;
+    int fd = s->fd, e, r;
 
     s->fd = -1;
     if (write_all(fd, first_leaf(s->b->root)) < 0 || (s->tmp && sys_sync(fd) < 0)) {
@@ -996,7 +996,12 @@ int buf_save_end(BufSave *s)
     if (sys_close(fd) < 0)
         return save_fail(s);
     s->phase = SV_OVER;
-    if (s->tmp && sys_replace(s->tmp, s->target, s->err, sizeof s->err) < 0)
+    r = s->tmp ? sys_replace(s->tmp, s->target, s->err, sizeof s->err) : 0;
+    if (r > 0) {                /* the text is only in the temporary file */
+        free(s->tmp);
+        s->tmp = NULL;
+    }
+    if (r != 0)
         return -1;
     s->ok = 1;
     return 0;

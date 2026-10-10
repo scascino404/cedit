@@ -45,6 +45,34 @@ static void win_error(char *err, size_t errlen, DWORD e)
         err[--n] = 0;
 }
 
+/* Whether something is at path, looking through a "\\?\" path: there may
+ * be a file that the calls taking path can't see, as its full path is too
+ * long (MAX_PATH characters or more, where Windows doesn't allow more). */
+static int exists_long(const char *path)
+{
+    enum { MAX = 32768 };
+    WCHAR *w = (WCHAR *)xmalloc(MAX * sizeof *w);
+    WCHAR *full = (WCHAR *)xmalloc((MAX + 8) * sizeof *full);   /* \\?\UNC + ... */
+    DWORD n = 0;
+    int r = 0;
+
+    if (MultiByteToWideChar(CP_ACP, 0, path, -1, w, MAX)) {
+        memcpy(full, L"\\\\?\\", 4 * sizeof *full);
+        n = GetFullPathNameW(w, MAX, full + 4, NULL);
+    }
+    if (n && n < MAX) {
+        if (full[4] == '\\' && full[5] == '\\') {
+            /* \\server\share\... is \\?\UNC\server\share\... */
+            memmove(full + 7, full + 5, n * sizeof *full);
+            memcpy(full + 4, L"UNC", 3 * sizeof *full);
+        }
+        r = GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES;
+    }
+    free(w);
+    free(full);
+    return r;
+}
+
 int sys_load(const char *path, char **data, size_t *len, int *mapped,
              char *err, size_t errlen)
 {
@@ -66,8 +94,10 @@ int sys_load(const char *path, char **data, size_t *len, int *mapped,
                     OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (h == INVALID_HANDLE_VALUE) {
         e = GetLastError();
-        if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND)
+        if ((e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND) && !exists_long(path))
             return 1;
+        if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND)
+            e = ERROR_FILENAME_EXCED_RANGE;     /* there, but out of reach */
         win_error(err, errlen, e);
         return -1;
     }
@@ -133,10 +163,14 @@ int sys_open_temp(char *tmpl, const char *like)
                  _S_IREAD | _S_IWRITE);
 }
 
+/* Not with _O_CREAT | _O_TRUNC, which is CREATE_ALWAYS: Windows refuses
+ * that for a hidden file. */
 int sys_open_write(const char *path)
 {
-    return _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
-                 _S_IREAD | _S_IWRITE);
+    int fd = _open(path, _O_WRONLY | _O_TRUNC | _O_BINARY);
+    if (fd < 0 && errno == ENOENT)
+        fd = _open(path, _O_WRONLY | _O_CREAT | _O_BINARY, _S_IREAD | _S_IWRITE);
+    return fd;
 }
 
 int sys_writable(const char *path)
@@ -194,6 +228,41 @@ int sys_close(int fd)
     return _close(fd);
 }
 
+/* Writes file tmp over file target, which stays, and removes tmp. Returns
+ * 0, -1 if target couldn't be opened (and is unchanged), or -2 with errno
+ * set if writing it failed. */
+static int copy_over(const char *tmp, const char *target)
+{
+    enum { CHUNK = 1 << 20 };
+    char *buf;
+    int in, out, n = 0, r = 0, e;
+
+    in = _open(tmp, _O_RDONLY | _O_BINARY);
+    if (in < 0)
+        return -1;
+    out = _open(target, _O_WRONLY | _O_TRUNC | _O_BINARY);
+    if (out < 0) {
+        _close(in);
+        return -1;
+    }
+    buf = (char *)xmalloc(CHUNK);
+    while (r == 0 && (n = _read(in, buf, CHUNK)) > 0)
+        r = write_out(out, buf, (size_t)n);
+    if (n < 0 || r < 0 || _commit(out) < 0)
+        r = -2;
+    e = errno;
+    free(buf);
+    _close(in);
+    if (_close(out) < 0 && r == 0) {
+        r = -2;
+        e = errno;
+    }
+    if (r == 0)
+        remove(tmp);
+    errno = e;
+    return r;
+}
+
 /* ReplaceFile keeps the target's attributes, permissions and creation
  * time. */
 int sys_replace(const char *tmp, const char *target, char *err, size_t errlen)
@@ -207,6 +276,26 @@ int sys_replace(const char *tmp, const char *target, char *err, size_t errlen)
         if (MoveFileExA(tmp, target, MOVEFILE_WRITE_THROUGH))
             return 0;
         e = GetLastError();
+    } else if (e == ERROR_SHARING_VIOLATION || e == ERROR_UNABLE_TO_REMOVE_REPLACED) {
+        /* another program has the file open, and won't let it be replaced
+         * (Python's open does that): write over it, as Notepad does. That
+         * can't even start if it can't be written, or is mapped, which
+         * makes it impossible to truncate: then the error is this one. */
+        int r = copy_over(tmp, target);
+        if (r == 0)
+            return 0;
+        if (r == -2) {
+            str_copy(err, errlen, strerror(errno));
+            return -1;
+        }
+    } else if (e == ERROR_UNABLE_TO_MOVE_REPLACEMENT) {
+        /* with no backup file, this leaves the target gone and the text
+         * only in tmp: put that in its place, or keep it */
+        if (MoveFileExA(tmp, target, MOVEFILE_WRITE_THROUGH))
+            return 0;
+        str_copy(err, errlen, "Not saved. The text is in ");
+        str_cat(err, errlen, tmp);
+        return 1;
     }
     win_error(err, errlen, e);
     return -1;
@@ -233,9 +322,29 @@ size_t sys_root_len(const char *p)
     return IS_SEP(p[0]) ? 1 : 0;
 }
 
+/* Past symbolic links, as realpath goes: ReplaceFile can't replace one. */
 char *sys_full_path(const char *path)
 {
-    char *p = _fullpath(NULL, path, 0);
+    char buf[4096], *p;
+    DWORD n = 0;
+    HANDLE h = CreateFileA(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+
+    if (h != INVALID_HANDLE_VALUE) {
+        n = GetFinalPathNameByHandleA(h, buf, sizeof buf,
+                                      FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+        CloseHandle(h);
+    }
+    if (n && n < sizeof buf) {
+        /* "\\?\C:\..." is "C:\...", "\\?\UNC\server\..." is "\\server\..." */
+        if (strncmp(buf, "\\\\?\\UNC\\", 8) == 0)
+            memmove(buf + 2, buf + 8, n - 8 + 1);
+        else if (strncmp(buf, "\\\\?\\", 4) == 0)
+            memmove(buf, buf + 4, n - 4 + 1);
+        p = xstrdup(buf);
+    } else {
+        p = _fullpath(NULL, path, 0);   /* not there yet, or no final path */
+    }
     if (p)
         sys_fix_slashes(p);
     return p;
