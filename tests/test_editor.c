@@ -75,6 +75,7 @@ static void test_columns(Editor *ed)
     static const char *const parts[] = {"a", "a", "a", "a", "a", "a", "\t",
                                         "\xc3\xa9", "\xe2\x86\xb5", "\xff", " "};
     char s[700];
+    long ref[sizeof s + 2];                 /* ref_disp_col of each byte */
     unsigned long r = 1;
     int k;
 
@@ -91,16 +92,18 @@ static void test_columns(Editor *ed)
         }
         len -= (r >> 4) % 100;
         for (col = 0; col <= len + 1; col++)
-            if (ed_disp_col(ed, s, len, col) != ref_disp_col(ed->opt->tabw, s, len, col)) {
+            ref[col] = ref_disp_col(ed->opt->tabw, s, len, col);
+        for (col = 0; col <= len + 1; col++)
+            if (ed_disp_col(ed, s, len, col) != ref[col]) {
                 printf("FAIL line %d: disp_col %lu\n", __LINE__, (unsigned long)col);
                 failures++;
                 return;
             }
-        total = ref_disp_col(ed->opt->tabw, s, len, len);
+        total = ref[len];
         for (dcol = -1; dcol <= total + 1; dcol++) {
             size_t i = ed_byte_col(ed, s, len, dcol), j = 0;
             /* the first character that doesn't end by dcol */
-            while (j < len && ref_disp_col(ed->opt->tabw, s, len, utf8_next(s, len, j)) <= dcol)
+            while (j < len && ref[utf8_next(s, len, j)] <= dcol)
                 j = utf8_next(s, len, j);
             if (i != j) {
                 printf("FAIL line %d: byte_col %ld: %lu, want %lu\n", __LINE__, dcol,
