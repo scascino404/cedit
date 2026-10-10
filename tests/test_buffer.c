@@ -9,6 +9,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <sddl.h>
+#endif
 
 #include "testutil.h"
 
@@ -281,6 +286,127 @@ static void test_crlf(void)
     unlink(path);
 }
 
+#ifdef _WIN32
+/* Saves text, as one insertion, to path. */
+static int save_text(const char *path, const char *text, char *err, size_t errlen)
+{
+    Buffer *b = buf_new();
+    int r;
+    buf_insert(b, 0, text, strlen(text));
+    r = buf_save(b, path, err, errlen);
+    buf_free(b);
+    return r;
+}
+
+/* Whether the file at path holds text. */
+static int holds(const char *path, const char *text)
+{
+    char got[64];
+    FILE *f = fopen(path, "rb");
+    size_t n = f ? fread(got, 1, sizeof got - 1, f) : 0;
+    if (f)
+        fclose(f);
+    got[n] = 0;
+    return f && strcmp(got, text) == 0;
+}
+
+/* Saving a file that another program holds open, or reached through a
+ * symbolic link; opening one whose path is too long for the "A" calls. */
+static void test_windows_files(void)
+{
+    char path[512], link[512], err[256], dir[2048];
+    WCHAR w[2048];
+    int i, r, ok, is_new = -1;
+    HANDLE h;
+    Buffer *b;
+    DWORD a;
+    PSECURITY_DESCRIPTOR sd;
+    FILE *f;
+
+    /* held open by a program that lets others read and write it, but not
+     * replace it */
+    close(tmp_file(path, sizeof path, "cedit-held"));
+    h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                    OPEN_EXISTING, 0, NULL);
+    r = save_text(path, "saved\n", err, sizeof err);
+    CloseHandle(h);
+    CHECK(r == 0, err, "save of a file held open");
+    CHECK(holds(path, "saved\n"), "held open", "not saved");
+    unlink(path);
+
+    /* through a symbolic link (when this account can make one) */
+    close(tmp_file(path, sizeof path, "cedit-target"));
+    sprintf(link, "%s.link", path);
+    strcpy(dir, path);              /* a link's target takes backslashes */
+    for (i = 0; dir[i]; i++)
+        if (dir[i] == '/')
+            dir[i] = '\\';
+    if (CreateSymbolicLinkA(link, dir, SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
+        r = save_text(link, "saved\n", err, sizeof err);
+        a = GetFileAttributesA(link);
+        DeleteFileA(link);
+        CHECK(r == 0, err, "save through a symbolic link");
+        CHECK(a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_REPARSE_POINT),
+              "symbolic link", "replaced by a file");
+        CHECK(holds(path, "saved\n"), "symbolic link", "target not saved");
+    } else {
+        printf("(no symbolic link test: this account can't make links)\n");
+    }
+    unlink(path);
+
+    /* a hidden file saved in place, in a folder where no file can be added
+     * (so no temporary file either), though the file can be written */
+    sprintf(dir, "%s/cedit-noadd", getenv("TEMP"));
+    sprintf(path, "%s/hidden.txt", dir);
+    CreateDirectoryA(dir, NULL);
+    f = fopen(path, "wb");
+    CHECK(f != NULL, "in place", "can't make the file");
+    fclose(f);
+    SetFileAttributesA(path, FILE_ATTRIBUTE_HIDDEN);
+    /* everyone: denied adding files to the folder, allowed all else */
+    CHECK(ConvertStringSecurityDescriptorToSecurityDescriptorA(
+              "D:P(D;;0x2;;;WD)(A;OICI;FA;;;WD)", SDDL_REVISION_1, &sd, NULL),
+          "in place", "no security descriptor");
+    r = SetFileSecurityA(dir, DACL_SECURITY_INFORMATION, sd) ? 0 : -1;
+    LocalFree(sd);
+    CHECK(r == 0, "in place", "can't deny adding files");
+    r = save_text(path, "saved\n", err, sizeof err);
+    a = GetFileAttributesA(path);
+    SetFileAttributesA(path, FILE_ATTRIBUTE_NORMAL);
+    ok = holds(path, "saved\n");
+    DeleteFileA(path);
+    RemoveDirectoryA(dir);
+    CHECK(r == 0, err, "save of a hidden file in place");
+    CHECK(ok, "in place", "not saved");
+    CHECK(a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_HIDDEN), "in place",
+          "no longer hidden");
+
+    /* a file at a path of over MAX_PATH characters is never taken for a new
+     * one: it opens where Windows allows long paths, or else fails */
+    sprintf(dir, "\\\\?\\%s\\cedit-long", getenv("TEMP"));
+    for (i = 0; i < 8; i++) {
+        if (i)
+            strcat(dir, "\\a-folder-name-long-enough-to-pass-max-path");
+        MultiByteToWideChar(CP_ACP, 0, dir, -1, w, 2048);
+        CreateDirectoryW(w, NULL);
+    }
+    strcat(dir, "\\file.txt");
+    MultiByteToWideChar(CP_ACP, 0, dir, -1, w, 2048);
+    h = CreateFileW(w, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    CHECK(h != INVALID_HANDLE_VALUE, "long path", "can't make the file");
+    CloseHandle(h);
+    b = buf_new();
+    r = buf_open(b, dir + 4, &is_new, err, sizeof err);
+    buf_free(b);
+    DeleteFileW(w);
+    for (i = 0; i < 8; i++) {
+        *wcsrchr(w, '\\') = 0;
+        RemoveDirectoryW(w);
+    }
+    CHECK(r < 0 || !is_new, "long path", "an existing file opened as a new one");
+}
+#endif
+
 /* The match buf_find should give, from the reference. */
 static size_t ref_find(size_t from, size_t to, const char *pat, size_t plen,
                        int icase, int backward)
@@ -342,6 +468,9 @@ int main(void)
     test_undo();
     test_load();
     test_crlf();
+#ifdef _WIN32
+    test_windows_files();
+#endif
     test_find();
     if (failures) {
         printf("%d FAILURES\n", failures);

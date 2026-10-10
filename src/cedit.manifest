@@ -3,12 +3,14 @@
   cedit.manifest - embedded into every Windows program of the build (see
   CMakeLists.txt). With the UTF-8 code page, the C library and the "A"
   Windows calls take and give file names in UTF-8, as cedit and SDL use
-  them, so cedit opens files whose names aren't ASCII.
+  them, so cedit opens files whose names aren't ASCII. Paths may be longer
+  than MAX_PATH where Windows allows that (the LongPathsEnabled setting).
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
     </windowsSettings>
   </application>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">

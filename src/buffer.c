@@ -561,6 +561,34 @@ static void win_error(char *err, size_t errlen, DWORD e)
         err[--n] = 0;
 }
 
+/* Whether something is at path, looking through a "\\?\" path: there may
+ * be a file that the calls taking path can't see, as its full path is too
+ * long (MAX_PATH characters or more, where Windows doesn't allow more). */
+static int exists_long(const char *path)
+{
+    enum { MAX = 32768 };
+    WCHAR *w = (WCHAR *)xmalloc(MAX * sizeof *w);
+    WCHAR *full = (WCHAR *)xmalloc((MAX + 8) * sizeof *full);   /* \\?\UNC + ... */
+    DWORD n = 0;
+    int r = 0;
+
+    if (MultiByteToWideChar(CP_ACP, 0, path, -1, w, MAX)) {
+        memcpy(full, L"\\\\?\\", 4 * sizeof *full);
+        n = GetFullPathNameW(w, MAX, full + 4, NULL);
+    }
+    if (n && n < MAX) {
+        if (full[4] == '\\' && full[5] == '\\') {
+            /* \\server\share\... is \\?\UNC\server\share\... */
+            memmove(full + 7, full + 5, n * sizeof *full);
+            memcpy(full + 4, L"UNC", 3 * sizeof *full);
+        }
+        r = GetFileAttributesW(full) != INVALID_FILE_ATTRIBUTES;
+    }
+    free(w);
+    free(full);
+    return r;
+}
+
 /* Maps the file at path, or reads it, into b->map. */
 static int map_file(Buffer *b, const char *path, int *is_new, char *err,
                     size_t errlen)
@@ -580,10 +608,12 @@ static int map_file(Buffer *b, const char *path, int *is_new, char *err,
                     OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (h == INVALID_HANDLE_VALUE) {
         e = GetLastError();
-        if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND) {
+        if ((e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND) && !exists_long(path)) {
             *is_new = 1;
             return 0;
         }
+        if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND)
+            e = ERROR_FILENAME_EXCED_RANGE;     /* there, but out of reach */
         win_error(err, errlen, e);
         return -1;
     }
@@ -1083,10 +1113,40 @@ static int save_fail(BufSave *s)
     return -1;
 }
 
+/* Opens the file at path to write it from the start, emptied, or made if
+ * it isn't there. (Not with O_CREAT | O_TRUNC, which Windows refuses for
+ * a hidden file.) */
+static int open_over(const char *path)
+{
+    int fd = open(path, O_WRONLY | O_TRUNC | O_BINARY);
+    if (fd < 0 && errno == ENOENT)
+        fd = open(path, O_WRONLY | O_CREAT | O_BINARY, 0666);
+    return fd;
+}
+
 #ifdef _WIN32
+/* The full path of the file at path, as realpath gives it: past symbolic
+ * links, which ReplaceFile can't replace. */
 static char *full_path(const char *path)
 {
-    return _fullpath(NULL, path, 0);
+    char buf[4096];
+    DWORD n = 0;
+    HANDLE h = CreateFileA(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+
+    if (h != INVALID_HANDLE_VALUE) {
+        n = GetFinalPathNameByHandleA(h, buf, sizeof buf,
+                                      FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+        CloseHandle(h);
+    }
+    if (!n || n >= sizeof buf)          /* a new file, or no final path */
+        return _fullpath(NULL, path, 0);
+    /* "\\?\C:\..." is "C:\...", "\\?\UNC\server\..." is "\\server\..." */
+    if (strncmp(buf, "\\\\?\\UNC\\", 8) == 0)
+        memmove(buf + 2, buf + 8, n - 8 + 1);
+    else if (strncmp(buf, "\\\\?\\", 4) == 0)
+        memmove(buf, buf + 4, n - 4 + 1);
+    return xstrdup(buf);
 }
 
 /* Creates the temporary file s->tmp, whose name ends in XXXXXX. Returns
@@ -1098,6 +1158,24 @@ static int open_temp(BufSave *s)
         return -1;
     return _open(s->tmp, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
                  _S_IREAD | _S_IWRITE);
+}
+
+static int write_all(int fd, Node *leaf);
+
+/* Writes the text over the target itself. */
+static int overwrite_target(BufSave *s)
+{
+    int fd = open_over(s->target), e;
+
+    if (fd < 0)
+        return -1;
+    if (write_all(fd, first_leaf(s->b->root)) < 0 || fsync(fd) < 0) {
+        e = errno;
+        close(fd);
+        errno = e;
+        return -1;
+    }
+    return close(fd);
 }
 
 /* Puts the temporary file in place of the target. ReplaceFile keeps the
@@ -1115,6 +1193,25 @@ static int replace_target(BufSave *s)
         if (MoveFileExA(s->tmp, s->target, MOVEFILE_WRITE_THROUGH))
             return 0;
         e = GetLastError();
+    } else if ((e == ERROR_SHARING_VIOLATION || e == ERROR_UNABLE_TO_REMOVE_REPLACED) &&
+               !s->b->map_is_mmap) {
+        /* another program has the file open, and won't let it be replaced
+         * (Python's open does that): write over it, as Notepad does. Not
+         * while it is mapped, which makes it impossible to truncate. */
+        if (overwrite_target(s) == 0)
+            return 0;
+        return save_fail(s);
+    } else if (e == ERROR_UNABLE_TO_MOVE_REPLACEMENT) {
+        /* with no backup file, this leaves the target gone and the text
+         * only in the temporary file: put that in its place, or keep it */
+        if (MoveFileExA(s->tmp, s->target, MOVEFILE_WRITE_THROUGH))
+            return 0;
+        str_copy(s->err, sizeof s->err, "Not saved. The text is in ");
+        str_cat(s->err, sizeof s->err, s->tmp);
+        free(s->tmp);
+        s->tmp = NULL;                  /* so that it stays */
+        s->phase = SV_OVER;
+        return -1;
     }
     win_error(s->err, sizeof s->err, e);
     s->phase = SV_OVER;
@@ -1282,7 +1379,7 @@ int buf_save_step(BufSave *s, size_t budget)
         /* nothing borrows from the mapping now, and Windows can't
          * truncate a mapped file */
         drop_map(b);
-        s->fd = open(s->target, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666);
+        s->fd = open_over(s->target);
         if (s->fd < 0)
             return save_fail(s);
         s->phase = SV_WRITE;
