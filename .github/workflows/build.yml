@@ -30,10 +30,11 @@ jobs:
             os: ubuntu-22.04
           - name: linux-arm64
             os: ubuntu-22.04-arm
-          # macOS: one binary for both Apple silicon and Intel
-          - name: macos-universal
+          # macOS: each built and tested on its own processor
+          - name: macos-arm64
             os: macos-latest
-            configure: -DCMAKE_OSX_ARCHITECTURES='arm64;x86_64'
+          - name: macos-x86_64
+            os: macos-26-intel
           - name: windows-x64
             os: windows-latest
     name: ${{ matrix.name }}
@@ -57,7 +58,7 @@ jobs:
           arch: x64
 
       - name: Configure
-        run: cmake --preset release ${{ matrix.configure }}
+        run: cmake --preset release
 
       - name: Build
         run: cmake --build --preset release
