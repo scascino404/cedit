@@ -33,6 +33,11 @@ int screen_init(Screen *s, int size, int w, int h)
 
     memset(s, 0, sizeof *s);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+#ifdef __SANITIZE_ADDRESS__
+    /* SDL_Quit frees what D-Bus keeps, for LeakSanitizer (SDL's docs say
+     * not to in a release build) */
+    SDL_SetHint(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1");
+#endif
     have_usable = SDL_GetDisplayUsableBounds(0, &usable) == 0;
     if (w > 0 && h > 0) {
         /* the size it had last time, within the display */

@@ -1,4 +1,6 @@
 build/
+build-debug/
+build-asan/
 references/
 CMakeUserPresets.json
 # Visual Studio, opening the folder

@@ -8,7 +8,8 @@
             "intelliSenseMode": "linux-clang-x64",
             "includePath": [
                 "${workspaceFolder}/src",
-                "/usr/include/SDL2"
+                "${workspaceFolder}/build/_deps/sdl2-build/include/SDL2",
+                "${workspaceFolder}/build/_deps/sdl2-build/include-config-release/SDL2"
             ],
             "defines": [
                 "_REENTRANT"

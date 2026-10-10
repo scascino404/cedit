@@ -4,7 +4,9 @@
 #   cmake --build --preset default    builds build/cedit, the tests and the tools
 #   ctest --preset default            runs the tests
 #
-# The editor is build/cedit, the tests and review tools sit next to it.
+# The editor is build/cedit, the tests and review tools sit next to it. The
+# presets debug and asan (AddressSanitizer and UBSan) build the same into
+# build-debug/ and build-asan/, for debugging.
 # Without the preset, cmake -B build uses the system's default compiler and
 # generator; cmake --preset default -DCMAKE_C_COMPILER=gcc picks gcc instead.
 #
@@ -15,23 +17,22 @@
 #
 # SDL2 is built from source, downloaded into the build directory the first
 # time, and linked in, as is the C runtime on Windows: cedit is a single file
-# to copy anywhere. On macOS it runs on Apple silicon and Intel Macs alike.
-# On Linux it needs the C library at the version it was built with or newer,
-# so build the ones to hand out on an older distribution.
+# to copy anywhere. On macOS it is built for the Mac's own processor;
+# -DCMAKE_OSX_ARCHITECTURES=x86_64 (or arm64, or "arm64;x86_64" for both)
+# picks another. On Linux it needs the C library at the version it was built
+# with or newer, so build the ones to hand out on an older distribution.
 cmake_minimum_required(VERSION 3.27)
 
-# macOS: one binary for both kinds of Mac, from macOS 11 on (these must be
-# set before project())
+# macOS: runs from macOS 11 on (set before project())
 if(CMAKE_HOST_APPLE)
-    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Architectures to build")
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS to run on")
 endif()
 
 project(cedit C)
 
-# -O2 -g unless told otherwise
+# a Release build unless told otherwise
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
 # for clangd / VSCode IntelliSense: build/compile_commands.json

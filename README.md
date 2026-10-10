@@ -58,6 +58,10 @@ sudo cmake --install build        # copies it to /usr/local/bin
 
 `build/cedit` is a single file: copy it wherever you like.
 
+For debugging, use the `debug` preset, or `asan` for AddressSanitizer and
+UBSan, in place of `default`. They build into `build-debug/` and
+`build-asan/`.
+
 The preset builds with clang and Ninja. To use gcc, configure with
 `cmake --preset default -DCMAKE_C_COMPILER=gcc`.
 
