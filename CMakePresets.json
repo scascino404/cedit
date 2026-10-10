@@ -2,19 +2,22 @@
     "version": 6,
     "configurePresets": [
         {
-            "name": "default",
-            "displayName": "clang + Ninja, Release",
+            "name": "release",
+            "displayName": "Ninja, Release",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
             "cacheVariables": {
-                "CMAKE_C_COMPILER": "clang",
                 "CMAKE_BUILD_TYPE": "Release"
             }
         },
         {
             "name": "debug",
-            "displayName": "clang + Ninja, Debug",
-            "inherits": "default",
+            "displayName": "Ninja, Debug",
+            "inherits": "release",
             "binaryDir": "${sourceDir}/build-debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
@@ -22,18 +25,18 @@
         },
         {
             "name": "asan",
-            "displayName": "clang + Ninja, Debug with AddressSanitizer and UBSan",
+            "displayName": "Ninja, Debug with AddressSanitizer and UBSan",
             "inherits": "debug",
             "binaryDir": "${sourceDir}/build-asan",
             "cacheVariables": {
-                "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
+                "CEDIT_SANITIZE": "ON"
             }
         }
     ],
     "buildPresets": [
         {
-            "name": "default",
-            "configurePreset": "default"
+            "name": "release",
+            "configurePreset": "release"
         },
         {
             "name": "debug",
@@ -46,20 +49,20 @@
     ],
     "testPresets": [
         {
-            "name": "default",
-            "configurePreset": "default",
+            "name": "release",
+            "configurePreset": "release",
             "output": {
                 "outputOnFailure": true
             }
         },
         {
             "name": "debug",
-            "inherits": "default",
+            "inherits": "release",
             "configurePreset": "debug"
         },
         {
             "name": "asan",
-            "inherits": "default",
+            "inherits": "release",
             "configurePreset": "asan"
         }
     ]

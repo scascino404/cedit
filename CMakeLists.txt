@@ -1,19 +1,16 @@
 # cedit - Classic Text Editor
 #
-#   cmake --preset default            configure (once): clang + Ninja, into build/
-#   cmake --build --preset default    builds build/cedit, the tests and the tools
-#   ctest --preset default            runs the tests
+#   cmake --preset release            configure (once): Ninja, into build/
+#   cmake --build --preset release    builds build/cedit, the tests and the tools
+#   ctest --preset release            runs the tests
 #
 # The editor is build/cedit, the tests and review tools sit next to it. The
 # presets debug and asan (AddressSanitizer and UBSan) build the same into
 # build-debug/ and build-asan/, for debugging.
-# Without the preset, cmake -B build uses the system's default compiler and
-# generator; cmake --preset default -DCMAKE_C_COMPILER=gcc picks gcc instead.
-#
-# On Windows, with Visual Studio (see README.md):
-#   cmake -B build
-#   cmake --build build --config Release    builds build/Release/cedit.exe
-#   ctest --test-dir build -C Release
+# It builds with clang where that is installed, else with the system's
+# default compiler; cmake --preset release -DCMAKE_C_COMPILER=gcc picks gcc.
+# On Windows it builds with Visual C++, in a Developer PowerShell for VS
+# (see README.md), and the editor is build/cedit.exe.
 #
 # SDL2 is built from source, downloaded into the build directory the first
 # time, and linked in, as is the C runtime on Windows: cedit is a single file
@@ -26,6 +23,16 @@ cmake_minimum_required(VERSION 3.27)
 # macOS: runs from macOS 11 on (set before project())
 if(CMAKE_HOST_APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS to run on")
+endif()
+
+# clang where it is installed, unless a compiler was picked (with
+# -DCMAKE_C_COMPILER or CC); on Windows, Visual Studio's own (set before
+# project())
+if(NOT CMAKE_HOST_WIN32 AND NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED ENV{CC})
+    find_program(CEDIT_CLANG clang)
+    if(CEDIT_CLANG)
+        set(CMAKE_C_COMPILER ${CEDIT_CLANG})
+    endif()
 endif()
 
 project(cedit C)
@@ -41,6 +48,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Visual C++, or clang for its ABI (not MinGW)
 if(WIN32 AND NOT MINGW)
     set(msvc_abi ON)
+endif()
+
+# a Developer PowerShell may be set up for 32-bit x86
+if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+    message(WARNING "This is a 32-bit build: for a 64-bit one, configure in the "
+                    "x64 Native Tools Command Prompt for VS (see README.md)")
 endif()
 
 set(CMAKE_C_STANDARD 90)
@@ -66,6 +79,21 @@ endif()
 if(msvc_abi)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+# the asan preset: AddressSanitizer, and UBSan where the compiler has it
+# (Visual C++ doesn't), in everything SDL included
+option(CEDIT_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
+if(CEDIT_SANITIZE AND MSVC)
+    add_compile_options(/fsanitize=address)
+    # neither goes with it: /RTC1 from CMake's Debug flags, /INCREMENTAL
+    string(REGEX REPLACE "/RTC[1csu]+" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
+    string(REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" CMAKE_EXE_LINKER_FLAGS_DEBUG
+           "${CMAKE_EXE_LINKER_FLAGS_DEBUG}")
+elseif(CEDIT_SANITIZE)
+    add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all
+                        -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
 endif()
 
 # SDL2, built as a static library without the subsystems cedit doesn't use.
@@ -179,7 +207,7 @@ target_link_libraries(uishot PRIVATE cedit_ui cedit_warnings)
 # The frame's GPU-side SDL calls are wrapped into no-ops, and screen_present
 # is wrapped to time it. They need Linux: memory is read from /proc, and the
 # wrapping is GNU ld's --wrap.
-#   cmake --build --preset default --target run_bench   runs them all
+#   cmake --build --preset release --target run_bench   runs them all
 #   build/bench -d build/bench-data -o base.tsv          saves a baseline,
 #   build/bench -d build/bench-data -b base.tsv          compares with it
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

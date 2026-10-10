@@ -50,18 +50,18 @@ current one.
 Then build it, and optionally install it:
 
 ```sh
-cmake --preset default            # configure, once (downloads SDL2)
-cmake --build --preset default    # builds build/cedit
-ctest --preset default            # runs the tests
+cmake --preset release            # configure, once (downloads SDL2)
+cmake --build --preset release    # builds build/cedit
+ctest --preset release            # runs the tests
 sudo cmake --install build        # copies it to /usr/local/bin
 ```
 
 For debugging, use the `debug` preset, or `asan` for AddressSanitizer and
-UBSan, in place of `default`. They build into `build-debug/` and
+UBSan, in place of `release`. They build into `build-debug/` and
 `build-asan/`.
 
-The preset builds with clang and Ninja. To use gcc, configure with
-`cmake --preset default -DCMAKE_C_COMPILER=gcc`.
+The presets build with Ninja, and with clang where it is installed. To use
+gcc, configure with `cmake --preset release -DCMAKE_C_COMPILER=gcc`.
 
 ### Windows
 
@@ -73,10 +73,14 @@ Either open the cedit folder in Visual Studio and build, or run these in a
 **Developer PowerShell for VS**:
 
 ```powershell
-cmake -B build
-cmake --build build --config Release    # builds build\Release\cedit.exe
-ctest --test-dir build -C Release       # runs the tests
+cmake --preset release            # configure, once (downloads SDL2)
+cmake --build --preset release    # builds build\cedit.exe
+ctest --preset release            # runs the tests
 ```
+
+The `debug` and `asan` presets work there too (`asan` without UBSan, which
+Visual C++ lacks). If the configure step warns of a 32-bit build, use the
+**x64 Native Tools Command Prompt for VS** instead.
 
 ## Run
 
