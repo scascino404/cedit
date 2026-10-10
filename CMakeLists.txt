@@ -4,7 +4,9 @@
 #   cmake --build --preset default    builds build/cedit, the tests and the tools
 #   ctest --preset default            runs the tests
 #
-# The editor is build/cedit, the tests and review tools sit next to it.
+# The editor is build/cedit, the tests and review tools sit next to it. The
+# presets debug and asan (AddressSanitizer and UBSan) build the same into
+# build-debug/ and build-asan/, for debugging.
 # Without the preset, cmake -B build uses the system's default compiler and
 # generator; cmake --preset default -DCMAKE_C_COMPILER=gcc picks gcc instead.
 #
@@ -12,17 +14,25 @@
 #   cmake -B build
 #   cmake --build build --config Release    builds build/Release/cedit.exe
 #   ctest --test-dir build -C Release
-# SDL2 is the one CMake finds (SDL2_DIR chooses one) or else the official
-# package for Visual C++, downloaded into the build directory. SDL2.dll is
-# copied next to the programs, and is all cedit.exe needs: the C runtime is
-# linked in.
+#
+# SDL2 is built from source, downloaded into the build directory the first
+# time, and linked in, as is the C runtime on Windows: cedit is a single file
+# to copy anywhere. On macOS it is built for the Mac's own processor;
+# -DCMAKE_OSX_ARCHITECTURES=x86_64 (or arm64, or "arm64;x86_64" for both)
+# picks another. On Linux it needs the C library at the version it was built
+# with or newer, so build the ones to hand out on an older distribution.
 cmake_minimum_required(VERSION 3.27)
+
+# macOS: runs from macOS 11 on (set before project())
+if(CMAKE_HOST_APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS to run on")
+endif()
 
 project(cedit C)
 
-# -O2 -g unless told otherwise
+# a Release build unless told otherwise
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
 # for clangd / VSCode IntelliSense: build/compile_commands.json
@@ -58,25 +68,46 @@ if(msvc_abi)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-find_package(SDL2 CONFIG QUIET)
-if(NOT SDL2_FOUND AND msvc_abi)
-    set(SDL2_VERSION 2.32.10)
-    set(SDL2_SHA256 af347939395a58b365846aaea27391e69f9ec9d4dd650d6ac40802159b418a6e)
-    set(sdl_dir ${CMAKE_BINARY_DIR}/_deps/SDL2-${SDL2_VERSION})
-    if(NOT EXISTS ${sdl_dir}/cmake/sdl2-config.cmake)
-        set(sdl_zip ${CMAKE_BINARY_DIR}/_deps/SDL2-devel-${SDL2_VERSION}-VC.zip)
-        message(STATUS "Downloading SDL2 ${SDL2_VERSION}")
-        file(DOWNLOAD
-             https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-VC.zip
-             ${sdl_zip} EXPECTED_HASH SHA256=${SDL2_SHA256})
-        file(ARCHIVE_EXTRACT INPUT ${sdl_zip} DESTINATION ${CMAKE_BINARY_DIR}/_deps)
-        file(REMOVE ${sdl_zip})
+# SDL2, built as a static library without the subsystems cedit doesn't use.
+# It loads the window system's libraries (X11, Wayland, OpenGL...) itself
+# when cedit starts, so only their development files are needed here.
+include(FetchContent)
+set(SDL2_VERSION 2.32.10)
+FetchContent_Declare(SDL2
+    URL https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-${SDL2_VERSION}.tar.gz
+    URL_HASH SHA256=5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165)
+block()
+    # SDL is C99, not C90
+    unset(CMAKE_C_STANDARD)
+    unset(CMAKE_C_EXTENSIONS)
+    # SDL's options take these variables (its policies predate that)
+    set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+    set(SDL_SHARED OFF)
+    set(SDL_STATIC ON)
+    set(SDL_TEST OFF)
+    set(SDL2_DISABLE_SDL2MAIN ON)
+    foreach(s AUDIO JOYSTICK HAPTIC HIDAPI POWER SENSOR LOCALE MISC)
+        set(SDL_${s} OFF)
+    endforeach()
+    FetchContent_MakeAvailable(SDL2)
+
+    # SDL leaves out a window system whose development files are missing
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        get_directory_property(x11 DIRECTORY ${sdl2_SOURCE_DIR} DEFINITION HAVE_X11)
+        get_directory_property(wayland DIRECTORY ${sdl2_SOURCE_DIR} DEFINITION HAVE_WAYLAND)
+        if(NOT x11 AND NOT wayland)
+            message(FATAL_ERROR "Neither X11's nor Wayland's development files "
+                                "were found: install them (see README.md)")
+        elseif(NOT wayland)
+            message(WARNING "Wayland's development files weren't found: cedit "
+                            "will run only under X11 (see README.md)")
+        elseif(NOT x11)
+            message(WARNING "X11's development files weren't found: cedit "
+                            "will run only under Wayland (see README.md)")
+        endif()
     endif()
-    find_package(SDL2 CONFIG REQUIRED PATHS ${sdl_dir} NO_DEFAULT_PATH)
-elseif(NOT SDL2_FOUND)
-    message(FATAL_ERROR "SDL2 not found: install its development files "
-                        "(see README.md), or set SDL2_DIR")
-endif()
+endblock()
+# (SDL2::SDL2 is the static library)
 
 # what cedit needs from the system (src/sys.h)
 if(WIN32)
@@ -114,14 +145,6 @@ if(WIN32)
     if(msvc_abi)
         # main, not WinMain (MinGW calls main anyway)
         target_link_options(cedit PRIVATE "LINKER:/ENTRY:mainCRTStartup")
-    endif()
-    # SDL2.dll next to the programs, which are all next to cedit
-    get_target_property(sdl_type SDL2::SDL2 TYPE)
-    if(sdl_type STREQUAL "SHARED_LIBRARY")
-        add_custom_command(TARGET cedit POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    $<TARGET_FILE:SDL2::SDL2> $<TARGET_FILE_DIR:cedit>)
-        install(FILES $<TARGET_FILE:SDL2::SDL2> TYPE BIN)
     endif()
 endif()
 

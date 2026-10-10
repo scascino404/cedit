@@ -3,11 +3,30 @@
     "configurePresets": [
         {
             "name": "default",
-            "displayName": "clang + Ninja",
+            "displayName": "clang + Ninja, Release",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
-                "CMAKE_C_COMPILER": "clang"
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "debug",
+            "displayName": "clang + Ninja, Debug",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/build-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "asan",
+            "displayName": "clang + Ninja, Debug with AddressSanitizer and UBSan",
+            "inherits": "debug",
+            "binaryDir": "${sourceDir}/build-asan",
+            "cacheVariables": {
+                "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
             }
         }
     ],
@@ -15,6 +34,14 @@
         {
             "name": "default",
             "configurePreset": "default"
+        },
+        {
+            "name": "debug",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "asan",
+            "configurePreset": "asan"
         }
     ],
     "testPresets": [
@@ -24,6 +51,16 @@
             "output": {
                 "outputOnFailure": true
             }
+        },
+        {
+            "name": "debug",
+            "inherits": "default",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "asan",
+            "inherits": "default",
+            "configurePreset": "asan"
         }
     ]
 }
