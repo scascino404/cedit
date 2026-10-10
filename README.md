@@ -34,15 +34,15 @@ It borrows from two places:
 
 ### Linux / macOS
 
-You need a C compiler, CMake 3.27 or newer, Ninja, and the SDL2 development
-files:
+You need a C compiler, CMake 3.27 or newer, Ninja, and on Linux the X11 and
+Wayland development files:
 
 | System | Install |
 |---|---|
-| Debian, Ubuntu | `sudo apt install build-essential clang cmake ninja-build libsdl2-dev` |
-| Fedora | `sudo dnf install clang cmake ninja-build SDL2-devel` |
-| Arch | `sudo pacman -S base-devel clang cmake ninja sdl2` |
-| macOS | `xcode-select --install`, then `brew install cmake ninja sdl2` |
+| Debian, Ubuntu | `sudo apt install build-essential clang cmake ninja-build libx11-dev libxext-dev libxcursor-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libwayland-dev libxkbcommon-dev libegl-dev libdecor-0-dev libdbus-1-dev libibus-1.0-dev` |
+| Fedora | `sudo dnf install clang cmake ninja-build libX11-devel libXext-devel libXcursor-devel libXfixes-devel libXi-devel libXrandr-devel libXScrnSaver-devel wayland-devel libxkbcommon-devel mesa-libEGL-devel libdecor-devel dbus-devel ibus-devel` |
+| Arch | `sudo pacman -S base-devel clang cmake ninja libx11 libxext libxcursor libxfixes libxi libxrandr libxss wayland libxkbcommon libglvnd libdecor dbus libibus` |
+| macOS | `xcode-select --install`, then `brew install cmake ninja` |
 
 Debian 12 and Ubuntu 22.04 ship an older CMake; `pipx install cmake` gets a
 current one.
@@ -50,11 +50,13 @@ current one.
 Then build it, and optionally install it:
 
 ```sh
-cmake --preset default            # configure, once
+cmake --preset default            # configure, once (downloads SDL2)
 cmake --build --preset default    # builds build/cedit
 ctest --preset default            # runs the tests
 sudo cmake --install build        # copies it to /usr/local/bin
 ```
+
+`build/cedit` is a single file: copy it wherever you like.
 
 The preset builds with clang and Ninja. To use gcc, configure with
 `cmake --preset default -DCMAKE_C_COMPILER=gcc`.
@@ -74,8 +76,7 @@ cmake --build build --config Release    # builds build\Release\cedit.exe
 ctest --test-dir build -C Release       # runs the tests
 ```
 
-`cedit.exe` needs only the `SDL2.dll` next to it: copy both wherever you
-like.
+`cedit.exe` is a single file: copy it wherever you like.
 
 ## Run
 
