@@ -78,8 +78,6 @@ cmake --build build --config Release    # builds build\Release\cedit.exe
 ctest --test-dir build -C Release       # runs the tests
 ```
 
-`cedit.exe` is a single file: copy it wherever you like.
-
 ## Run
 
 ```sh
