@@ -29,7 +29,7 @@ $(BUILD)/cedit: $(OBJ)
 $(OBJ_DIR)/%.o: src/%.c src/*.h | $(OBJ_DIR)/tests
 	$(CC) $(WARN) $(CFLAGS) $(SDL_CFLAGS) -c -o $@ $<
 
-$(OBJ_DIR)/tests/%.o: tests/%.c src/*.h | $(OBJ_DIR)/tests
+$(OBJ_DIR)/tests/%.o: tests/%.c src/*.h tests/*.h | $(OBJ_DIR)/tests
 	$(CC) $(WARN) $(CFLAGS) $(SDL_CFLAGS) -c -o $@ $<
 
 $(OBJ_DIR)/tests:

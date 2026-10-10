@@ -1,2 +1,5 @@
 build/
 references/
+# Visual Studio, opening the folder
+.vs/
+out/

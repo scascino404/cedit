@@ -17,7 +17,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <time.h>
 
 #define BLINK_MS   300
@@ -456,7 +455,7 @@ static void load_dir(App *a)
     field_set(dlg_find(d, ID_DIR), len < FIELD_MAX ? a->dir : a->dir + len - (FIELD_MAX - 1));
     dlg_list_clear(d);
     d->sel = 0;
-    n = dir_list(a->dir, 1, &ents);
+    n = dir_list(a->dir, 1, NULL, &ents);
     if (n < 0) {
         str_copy(d->msg, sizeof d->msg, "Cannot read this directory.");
         return;
@@ -889,20 +888,16 @@ static void save_steps(App *a, Uint64 end)
 static int add_dir(App *a, const char *path, int at, int depth)
 {
     DirEntry *ents;
-    struct stat cur;
-    const char *cur_path = a->win->ed.doc->path;
-    int have_cur = cur_path && stat(cur_path, &cur) == 0;
-    int n = dir_list(path, 0, &ents), i, added = 0;
+    int n = dir_list(path, 0, a->win->ed.doc->path, &ents), i, added = 0;
 
     for (i = 0; i < n; i++) {
-        const struct stat *st = &ents[i].st;
         char size[16] = "";
         int flags = 0;
-        if (S_ISDIR(st->st_mode)) {
+        if (ents[i].folder) {
             flags = LI_FOLDER;
-        } else if (S_ISREG(st->st_mode)) {
-            format_size(size, (double)st->st_size);
-            if (have_cur && st->st_dev == cur.st_dev && st->st_ino == cur.st_ino)
+        } else if (ents[i].file) {
+            format_size(size, ents[i].size);
+            if (ents[i].current)
                 flags = LI_CHECKED;
         } else {
             continue;
@@ -957,7 +952,7 @@ static void toggle_folder(App *a, int i)
         return;
     }
     item_path(a, i, path, sizeof path);
-    rel = path + strlen(a->dir) + (strcmp(a->dir, "/") != 0);
+    rel = path + strlen(a->dir) + (a->dir[strlen(a->dir) - 1] != '/');
     n = add_dir(a, path, i + 1, a->menu.list[i].depth + 1);
     if (n < 0) {
         set_msg(a, "Cannot read ", rel);
@@ -984,8 +979,7 @@ static void file_accept(App *a)
     Dialog *d = &a->dlg;
     Widget *f = dlg_find(d, ID_NAME);
     char path[sizeof a->dir + FIELD_MAX];
-    struct stat st;
-    int exists;
+    int kind, exists;
 
     if (d->dirty)                       /* a new name needs a new "replace?" */
         a->overwrite[0] = 0;
@@ -995,11 +989,10 @@ static void file_accept(App *a)
     if (!f->len)
         return;
     path_resolve(path, sizeof path, a->dir, f->text);
-    exists = stat(path, &st) == 0;
-    if (exists && S_ISDIR(st.st_mode)) {
-        char *rp = realpath(path, NULL);
-        str_copy(a->dir, sizeof a->dir, rp ? rp : path);
-        free(rp);
+    kind = path_kind(path);
+    exists = kind >= 0;
+    if (kind == 1) {
+        path_full(a->dir, sizeof a->dir, path);
         field_set(f, "");
         d->msg[0] = 0;
         load_dir(a);

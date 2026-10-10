@@ -10,7 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+
+#include "testutil.h"
 
 static int failures;
 
@@ -38,8 +39,8 @@ static void expect(Editor *ed, const char *want, int line)
 
 static void open_text(Editor *ed, const char *text)
 {
-    char path[] = "/tmp/cedit-ed-XXXXXX";
-    int fd = mkstemp(path);
+    char path[512];
+    int fd = tmp_file(path, sizeof path, "cedit-ed");
     char err[128];
     if (write(fd, text, strlen(text)) < 0)
         printf("write failed\n");
@@ -168,10 +169,10 @@ static char *slice_text(size_t *n)
 /* Opens text as a file that is still loading. */
 static void open_loading(Editor *ed, const char *text, size_t n)
 {
-    char path[] = "/tmp/cedit-ed-XXXXXX";
-    int fd = mkstemp(path);
+    char path[512];
+    int fd = tmp_file(path, sizeof path, "cedit-ed");
     char err[128];
-    if (write(fd, text, n) != (ssize_t)n)
+    if (write(fd, text, n) != (long)n)
         printf("write failed\n");
     close(fd);
     ed_open(ed, path, err, sizeof err);
