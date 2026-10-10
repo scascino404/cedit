@@ -30,6 +30,35 @@ It borrows from two places:
   TypeScript, JSON, Go, Rust, Lua and Markdown.
 - Light and dark themes, three text sizes, word wrap and line numbers.
 
+## Downloads
+
+Ready-made builds of each release are on the
+[Releases](https://github.com/scascino404/cedit/releases/latest) page:
+
+| File | Runs on |
+|---|---|
+| `cedit-linux-x86_64.tar.gz` | Linux on 64-bit Intel or AMD, with glibc 2.34 or newer (Ubuntu 22.04, Debian 12, Fedora 35, RHEL 9 and later) |
+| `cedit-linux-arm64.tar.gz` | Linux on 64-bit ARM, such as a Raspberry Pi 4 or 5 with a 64-bit system, with glibc 2.34 or newer |
+| `cedit-macos-arm64.tar.gz` | Macs with Apple silicon (M1 and later), macOS 11 or newer |
+| `cedit-macos-x86_64.tar.gz` | Macs with an Intel processor, macOS 11 or newer |
+| `cedit-windows-x64.zip` | Windows 10 and 11, 64-bit |
+
+Each holds a single program file, with nothing to install. On Linux and
+macOS, unpack it and run it:
+
+```sh
+tar -xzf cedit-linux-x86_64.tar.gz
+./cedit [file]
+sudo mv cedit /usr/local/bin/     # optional: run it as cedit from anywhere
+```
+
+On macOS, a download from a browser is blocked the first time, as cedit
+isn't signed by Apple; `xattr -d com.apple.quarantine cedit` allows it.
+
+On Windows, unpack the zip and double-click `cedit.exe`, or run
+`cedit.exe [file]` from a terminal. If SmartScreen warns of an
+unrecognized app, choose **More info**, then **Run anyway**.
+
 ## Build
 
 ### Linux / macOS
