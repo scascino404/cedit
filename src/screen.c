@@ -187,6 +187,14 @@ void screen_layout(Screen *s)
     s->full = 1;
 }
 
+void screen_reset(Screen *s)
+{
+    if (s->tex)
+        SDL_DestroyTexture(s->tex);
+    s->tex = NULL;              /* screen_layout makes it again */
+    screen_layout(s);
+}
+
 /* Sets the minimum window size for the text size. Not before the first
  * frame is shown: Hyprland gives a floating Wayland window the minimum
  * size if that comes before any frame. */
@@ -285,7 +293,9 @@ Scrollbar scrollbar_make(long total, long top, int h)
     sb.len = total > h ? (int)((long)sb.track * h / total) : sb.track;
     if (sb.len < 1)
         sb.len = 1;
-    sb.pos = range > 0 ? (int)((sb.track - sb.len) * top / range) : 0;
+    /* (in 64 bits: Windows' long has 32, too few for this product in a
+     * file of tens of millions of lines) */
+    sb.pos = range > 0 ? (int)((Sint64)(sb.track - sb.len) * top / range) : 0;
     if (sb.pos > sb.track - sb.len)
         sb.pos = sb.track - sb.len;
     return sb;

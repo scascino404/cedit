@@ -1608,8 +1608,8 @@ static void scrollbar_drag(App *a, int cy)
     if (pos > room)
         pos = room;
     /* round up, so scrollbar_make's rounding down puts the thumb back
-     * under the pointer */
-    ed->top = ((long)pos * range + room - 1) / room;
+     * under the pointer (in 64 bits, as there) */
+    ed->top = (long)(((Sint64)pos * range + room - 1) / room);
     ed->top_row = 0;
     ed_scroll(ed, 0);
 }
@@ -1971,7 +1971,7 @@ void app_event(App *a, const SDL_Event *e)
         break;
     case SDL_RENDER_TARGETS_RESET:
     case SDL_RENDER_DEVICE_RESET:
-        screen_layout(&a->scr);
+        screen_reset(&a->scr);
         break;
     case SDL_KEYDOWN:
         key_down(a, &e->key);

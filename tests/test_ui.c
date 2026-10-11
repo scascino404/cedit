@@ -1,7 +1,8 @@
 /*
  * test_ui.c - the work that goes on over several frames, driven through the
  * real UI headlessly: searching, Replace All, saving, and moves that wait
- * for a big file to load; and what the user can do meanwhile.
+ * for a big file to load; and what the user can do meanwhile. Also the
+ * scrollbar of a huge file, and a renderer that loses its textures.
  *
  * The file is big enough (128 MB) that none of it fits in one frame.
  */
@@ -112,6 +113,24 @@ static int starts(long ln, const char *s)
     size_t len;
     const char *l = line(ln, &len);
     return len >= strlen(s) && memcmp(l, s, strlen(s)) == 0;
+}
+
+/* The screen: the scrollbar of more lines than Windows' 32-bit long can
+ * multiply, and the textures made again when the renderer loses them. */
+static void test_screen(void)
+{
+    Scrollbar sb = scrollbar_make(2000000000L, 1999999900L, 100);
+    SDL_Event e;
+
+    CHECK(sb.pos == sb.track - sb.len);
+    sb = scrollbar_make(2000000000L, 999999950L, 100);
+    CHECK(sb.pos == (sb.track - sb.len) / 2);
+    memset(&e, 0, sizeof e);
+    e.type = SDL_RENDER_DEVICE_RESET;
+    app_event(&app, &e);
+    CHECK(app.scr.tex != NULL && app.scr.full);
+    frame();
+    CHECK(!app.scr.full);
 }
 
 /* Moves that wait for the file to load. */
@@ -415,6 +434,7 @@ int main(void)
     }
     app.blink_next = (unsigned long)-1;
 
+    test_screen();
     test_moves();
 #ifdef __APPLE__
     test_mac();

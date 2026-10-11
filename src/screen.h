@@ -77,6 +77,9 @@ int screen_init(Screen *s, int size, int w, int h);
 void screen_quit(Screen *s);
 /* Recomputes the grid after a resize or text size change. */
 void screen_layout(Screen *s);
+/* Makes the textures again, after the renderer lost them
+ * (SDL_RENDER_DEVICE_RESET), and redraws everything. */
+void screen_reset(Screen *s);
 /* Chooses the text size, and the smallest window that fits a grid of it. */
 void screen_set_size(Screen *s, int size);
 
