@@ -964,16 +964,18 @@ static int delete_selection(Editor *ed, unsigned long now)
 void ed_type(Editor *ed, const char *s, size_t n, unsigned long now)
 {
     size_t off;
-    int space = n == 1 && (s[0] == ' ' || s[0] == '\t');
+    int space = n == 1 && (s[0] == ' ' || s[0] == '\t'), replaced;
 
     if (!n)
         return;
     if (ed_has_selection(ed))
         ed->moved = 1;          /* replacing a selection starts a new step */
     group(ed, K_TYPE, space, now);
-    del_sel(ed);
+    replaced = del_sel(ed);
     off = cur_off(ed);
-    if (ed->opt->overwrite) {
+    /* overwrite mode types over the characters after the cursor; a
+     * selection it replaces, as insert mode does */
+    if (ed->opt->overwrite && !replaced) {
         size_t len, end = ed->cx, i;
         const char *l = ed_line(ed, ed->cy, &len);
         for (i = 0; i < n; i = utf8_next(s, n, i))

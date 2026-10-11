@@ -417,6 +417,11 @@ int main(void)
     opt.overwrite = 1;
     type(&ed, "XY", &t);
     EXPECT(&ed, "XYcdef");
+    /* ... but a selection is replaced, and only it */
+    ed_set_cursor(&ed, 0, 4, 0);
+    ed_set_cursor(&ed, 0, 2, 1);
+    type(&ed, "Z", &t);
+    EXPECT(&ed, "XYZef");
     opt.overwrite = 0;
 
     /* word motion */
