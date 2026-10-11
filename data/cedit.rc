@@ -1,0 +1,2 @@
+/* cedit.exe's icon: Explorer shows it, and SDL gives it to the window */
+1 ICON "cedit.ico"

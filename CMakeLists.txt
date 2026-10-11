@@ -173,7 +173,19 @@ target_link_libraries(cedit PRIVATE cedit_ui cedit_warnings)
 
 install(TARGETS cedit)
 
+# Linux: the launcher's entry and its icon (src/logo.c's, see logo.h),
+# so cedit opens like any app
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include(GNUInstallDirs)
+    install(FILES data/cedit.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES data/cedit.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+endif()
+
 if(WIN32)
+    # cedit.exe's icon (on macOS, cedit sets the Dock's itself: screen.c)
+    target_sources(cedit PRIVATE data/cedit.rc)
     # every program takes and gives file names in UTF-8 (see the manifest)
     target_sources(cedit_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/cedit.manifest)
     if(msvc_abi)

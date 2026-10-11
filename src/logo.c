@@ -28,13 +28,36 @@ static const char *const art[] = {
     NULL
 };
 
+static unsigned char color(char c)
+{
+    return (unsigned char)(c == '.' ? PIC_CLEAR
+                           : c >= 'A' ? c - 'A' + 10 : c - '0');
+}
+
 void logo_pixels(unsigned char *px)
 {
     int x, y;
     for (y = 0; art[y]; y++)
-        for (x = 0; art[y][x]; x++) {
-            char c = art[y][x];
-            *px++ = (unsigned char)(c == '.' ? PIC_CLEAR
-                                    : c >= 'A' ? c - 'A' + 10 : c - '0');
+        for (x = 0; art[y][x]; x++)
+            *px++ = color(art[y][x]);
+}
+
+/* The "c" and the cursor are 13 columns each, shadow included; the icon
+ * puts them a column apart, with their ink (all but the shadow) centered. */
+#define C_X 0
+#define CURSOR_X 66
+#define ICON_X 3
+#define ICON_Y 9
+
+void icon_pixels(unsigned char *px)
+{
+    int x, y;
+    for (x = 0; x < ICON_SIZE * ICON_SIZE; x++)
+        px[x] = PIC_CLEAR;
+    for (y = 0; art[y]; y++)
+        for (x = 0; x < 13; x++) {
+            unsigned char *row = px + (ICON_Y + y) * ICON_SIZE + ICON_X;
+            row[x] = color(art[y][C_X + x]);
+            row[14 + x] = color(art[y][CURSOR_X + x]);
         }
 }

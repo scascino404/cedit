@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=cedit
+GenericName=Text Editor
+Comment=Classic text editor
+Exec=cedit %f
+Icon=cedit
+Terminal=false
+Categories=Utility;TextEditor;
+Keywords=text;editor;code;
+MimeType=text/plain;
+StartupWMClass=cedit

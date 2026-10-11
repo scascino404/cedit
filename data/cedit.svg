@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="256" height="256" shape-rendering="crispEdges">
+  <title>cedit</title>
+  <path fill="#AA0000" d="M3 17h4v1h-4zM3 18h4v1h-4zM3 19h4v1h-4zM11 19h4v1h-4zM3 20h4v1h-4zM11 20h4v1h-4zM5 21h8v1h-8zM5 22h8v1h-8z"/>
+  <path fill="#AA00AA" d="M17 17h12v1h-12zM17 18h12v1h-12zM17 19h12v1h-12zM17 20h12v1h-12zM17 21h12v1h-12zM17 22h12v1h-12z"/>
+  <path fill="#555555" d="M29 10h1v1h-1zM29 11h1v1h-1zM29 12h1v1h-1zM29 13h1v1h-1zM13 14h1v1h-1zM29 14h1v1h-1zM7 15h4v1h-4zM29 15h1v1h-1zM7 16h1v1h-1zM15 16h1v1h-1zM29 16h1v1h-1zM7 17h1v1h-1zM12 17h4v1h-4zM29 17h1v1h-1zM7 18h1v1h-1zM29 18h1v1h-1zM7 19h1v1h-1zM29 19h1v1h-1zM7 20h1v1h-1zM15 20h1v1h-1zM29 20h1v1h-1zM4 21h1v1h-1zM13 21h3v1h-3zM29 21h1v1h-1zM13 22h1v1h-1zM29 22h1v1h-1zM6 23h8v1h-8zM18 23h12v1h-12z"/>
+  <path fill="#FF5555" d="M5 13h8v1h-8zM5 14h8v1h-8zM3 15h4v1h-4zM11 15h4v1h-4zM3 16h4v1h-4zM11 16h4v1h-4z"/>
+  <path fill="#FF55FF" d="M17 9h12v1h-12zM17 10h12v1h-12zM17 11h12v1h-12zM17 12h12v1h-12zM17 13h12v1h-12zM17 14h12v1h-12zM17 15h12v1h-12zM17 16h12v1h-12z"/>
+</svg>

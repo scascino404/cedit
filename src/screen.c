@@ -2,6 +2,7 @@
  * screen.c - character grid, dirty-cell rasterizer and SDL presentation.
  */
 #include "screen.h"
+#include "logo.h"
 #include "utf8.h"
 #include "util.h"
 
@@ -25,6 +26,34 @@ static const struct {
     {&font_8x8, 2, 2},
     {&font_8x8, 3, 3}
 };
+
+#ifdef __APPLE__
+/* macOS: the Dock's icon, as cedit isn't an app bundle that could hold one
+ * (Windows takes it from cedit.exe, Linux desktops from cedit.desktop).
+ * The icon at 8 screen pixels to its pixel, the Dock's largest. */
+static void set_app_icon(SDL_Window *win)
+{
+    enum { SCALE = 8, SIDE = ICON_SIZE * SCALE };
+    unsigned char px[ICON_SIZE * ICON_SIZE];
+    SDL_Surface *icon;
+    int x, y;
+
+    icon = SDL_CreateRGBSurfaceWithFormat(0, SIDE, SIDE, 32,
+                                          SDL_PIXELFORMAT_ARGB8888);
+    if (!icon)
+        return;
+    icon_pixels(px);
+    for (y = 0; y < SIDE; y++) {
+        Uint32 *row = (Uint32 *)((Uint8 *)icon->pixels + y * icon->pitch);
+        for (x = 0; x < SIDE; x++) {
+            unsigned char p = px[y / SCALE * ICON_SIZE + x / SCALE];
+            row[x] = p == PIC_CLEAR ? 0 : palette[p & 15];
+        }
+    }
+    SDL_SetWindowIcon(win, icon);
+    SDL_FreeSurface(icon);
+}
+#endif
 
 int screen_init(Screen *s, int size, int w, int h)
 {
@@ -60,6 +89,9 @@ int screen_init(Screen *s, int size, int w, int h)
                               SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!s->win)
         return -1;
+#ifdef __APPLE__
+    set_app_icon(s->win);
+#endif
     s->ren = SDL_CreateRenderer(s->win, -1, SDL_RENDERER_ACCELERATED);
     if (!s->ren)
         s->ren = SDL_CreateRenderer(s->win, -1, SDL_RENDERER_SOFTWARE);

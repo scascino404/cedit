@@ -85,6 +85,11 @@ ctest --preset release            # runs the tests
 sudo cmake --install build        # copies it to /usr/local/bin
 ```
 
+On Linux, installing also adds cedit, with its icon, to the desktop's
+application launcher. To install it for yourself only, without `sudo`, use
+`cmake --install build --prefix ~/.local` (with `~/.local/bin` on your
+`PATH`).
+
 For debugging, use the `debug` preset, or `asan` for AddressSanitizer and
 UBSan, in place of `release`. They build into `build-debug/` and
 `build-asan/`.
