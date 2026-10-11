@@ -16,6 +16,13 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
+/* Files up to this size are read rather than mapped. Another program that
+ * saves over a mapped file in place, as `echo text > file` does, changes
+ * the text under cedit's tree, or takes it away (truncating the file),
+ * which crashes cedit (SIGBUS) where it reads it. Bigger files are mapped,
+ * so that they open at once. */
+#define READ_MAX ((size_t)16 * 1024 * 1024)
+
 int sys_load(const char *path, char **data, size_t *len, int *mapped,
              char *err, size_t errlen)
 {
@@ -42,7 +49,7 @@ int sys_load(const char *path, char **data, size_t *len, int *mapped,
         close(fd);
         return -1;
     }
-    if (S_ISREG(st.st_mode) && st.st_size > 0) {
+    if (S_ISREG(st.st_mode) && (size_t)st.st_size > READ_MAX) {
         void *m = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
         if (m != MAP_FAILED) {
 #ifdef POSIX_MADV_SEQUENTIAL
@@ -54,9 +61,11 @@ int sys_load(const char *path, char **data, size_t *len, int *mapped,
         }
     }
     if (!*data) {
-        /* Not mappable (pipe, /proc, whose files say they are empty, ...):
-         * read it into one heap block. */
-        size_t cap = 65536, n = 0;
+        /* Small, or not mappable (pipe, /proc, whose files say they are
+         * empty, ...): read it into one heap block, of the file's size and
+         * a byte, to see the end without growing it. */
+        size_t cap = S_ISREG(st.st_mode) && st.st_size > 0
+                         ? (size_t)st.st_size + 1 : 65536, n = 0;
         char *d = (char *)xmalloc(cap);
         for (;;) {
             ssize_t r;

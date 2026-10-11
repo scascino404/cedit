@@ -1,9 +1,10 @@
 /*
  * test_save.c - saving and opening files where the systems go their own
  * ways: a file's attributes kept, a file reached through a symbolic link,
- * and one saved in place in a folder where no file can be added; on
- * Windows also a file another program holds open, and one whose path is
- * too long for the "A" calls.
+ * one saved in place in a folder where no file can be added, and one
+ * another program saves over while it is open; on Windows also a file
+ * another program holds open, and one whose path is too long for the "A"
+ * calls.
  */
 #ifndef _WIN32
 #define _XOPEN_SOURCE 700
@@ -243,6 +244,43 @@ static void test_in_place(void)
     CHECK(kept, "the file lost its attributes");
 }
 
+/* Saved over by another program, in place, while it is open: the text
+ * opened stays as it was (cedit has read the file, where a mapping of it
+ * would have changed, or crashed cedit as the file was cut short). */
+static void test_rewritten(void)
+{
+    char path[512], err[256] = "", want[16];
+    FILE *f = tmp_file(path, sizeof path, "cedit-rewritten");
+    Buffer *b;
+    const char *l;
+    size_t len;
+    int i, is_new, r;
+
+    CHECK(f != NULL, "can't make the file");
+    if (!f)
+        return;
+    for (i = 0; i < 10000; i++)
+        fprintf(f, "line %05d\n", i);
+    fclose(f);
+    b = buf_new();
+    r = buf_open(b, path, &is_new, err, sizeof err);
+    CHECK(r == 0, err);
+    f = fopen(path, "wb");          /* cut short, as `echo > file` does */
+    if (f) {
+        fputs("rewritten\n", f);
+        fclose(f);
+    }
+    buf_load_all(b);
+    CHECK(buf_lines(b) == 10001, "the lines opened");
+    for (i = 0; r == 0 && i < 10000; i += 999) {
+        sprintf(want, "line %05d", i);
+        l = buf_line(b, i, &len);
+        CHECK(len == strlen(want) && memcmp(l, want, len) == 0, want);
+    }
+    buf_free(b);
+    remove(path);
+}
+
 #ifdef _WIN32
 
 /* Held open by a program that lets others read and write it, but not
@@ -307,6 +345,7 @@ int main(void)
     test_replaced();
     test_link();
     test_in_place();
+    test_rewritten();
 #ifdef _WIN32
     test_held_open();
     test_long_path();
