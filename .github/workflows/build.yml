@@ -74,6 +74,11 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then
             cp build/cedit.exe LICENSE dist/
             (cd dist && 7z a ../cedit-${{ matrix.name }}.zip cedit.exe LICENSE)
+          elif [ "$RUNNER_OS" = Linux ]; then
+            # with the launcher's entry and icon (see README.md)
+            cp build/cedit LICENSE data/cedit.desktop data/cedit.svg dist/
+            tar -czf cedit-${{ matrix.name }}.tar.gz -C dist cedit LICENSE \
+              cedit.desktop cedit.svg
           else
             cp build/cedit LICENSE dist/
             tar -czf cedit-${{ matrix.name }}.tar.gz -C dist cedit LICENSE

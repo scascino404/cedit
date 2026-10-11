@@ -52,6 +52,17 @@ tar -xzf cedit-linux-x86_64.tar.gz
 sudo mv cedit /usr/local/bin/     # optional: run it as cedit from anywhere
 ```
 
+The Linux files also hold an entry and an icon for the desktop's
+application launcher. To install cedit for yourself with them:
+
+```sh
+install -Dm755 cedit ~/.local/bin/cedit
+install -Dm644 cedit.desktop ~/.local/share/applications/cedit.desktop
+install -Dm644 cedit.svg ~/.local/share/icons/hicolor/scalable/apps/cedit.svg
+```
+
+The launcher runs `cedit`, so `~/.local/bin` has to be on your `PATH`.
+
 On macOS, a download from a browser is blocked the first time, as cedit
 isn't signed by Apple; `xattr -d com.apple.quarantine cedit` allows it.
 
