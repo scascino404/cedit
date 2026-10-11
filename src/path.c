@@ -61,22 +61,26 @@ void path_dir(char *out, size_t size, const char *path)
     }
 }
 
+/* "../" first, then the folders, then the files, by name ignoring case
+ * (and names that differ only in case by case, for an order that doesn't
+ * depend on qsort's). */
 static int cmp_entries(const void *pa, const void *pb)
 {
     const char *x = ((const DirEntry *)pa)->name, *y = ((const DirEntry *)pb)->name;
     int dx = x[strlen(x) - 1] == '/', dy = y[strlen(y) - 1] == '/';
-    if (strcmp(x, "../") == 0)
-        return -1;
-    if (strcmp(y, "../") == 0)
-        return 1;
+    int px = strcmp(x, "../") == 0, py = strcmp(y, "../") == 0;
+    size_t i;
+
+    if (px != py)
+        return py - px;
     if (dx != dy)
         return dy - dx;
-    for (; *x && *y; x++, y++) {
-        int c = ascii_lower((unsigned char)*x) - ascii_lower((unsigned char)*y);
+    for (i = 0; x[i] && y[i]; i++) {
+        int c = ascii_lower((unsigned char)x[i]) - ascii_lower((unsigned char)y[i]);
         if (c)
             return c;
     }
-    return (unsigned char)*x - (unsigned char)*y;
+    return x[i] || y[i] ? (unsigned char)x[i] - (unsigned char)y[i] : strcmp(x, y);
 }
 
 int dir_list(const char *dir, int parent, const char *mark, DirEntry **out)
