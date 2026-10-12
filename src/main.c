@@ -5,6 +5,10 @@
 #include "ui.h"
 
 #include <string.h>
+#ifdef __APPLE__
+#include <stdlib.h>
+#include <unistd.h>
+#endif
 
 /* Keys that move the cursor or a menu selection a step at a time. */
 static int step_key(SDL_Keycode sym)
@@ -40,6 +44,16 @@ int main(int argc, char **argv)
         sys_report("usage: cedit [file]", 0);
         return 0;
     }
+#ifdef __APPLE__
+    /* Finder starts cedit.app in /: with no file given, the Open dialog
+     * starts in the home folder instead */
+    if (argc < 2) {
+        char cwd[2];                    /* fits only "/" */
+        const char *home = getenv("HOME");
+        if (getcwd(cwd, sizeof cwd) && cwd[0] == '/' && home && *home)
+            (void)chdir(home);
+    }
+#endif
     /* On Windows, window sizes in units the display scale is applied to,
      * as on macOS, rather than a window the system stretches, which blurs
      * the text. (SDL_HINT_WINDOWS_DPI_SCALING, which older SDL2 lacks.) */

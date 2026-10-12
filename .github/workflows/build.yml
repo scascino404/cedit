@@ -1,6 +1,6 @@
 # Builds cedit and runs the tests on every system it supports, for every
 # push and pull request. Each build's binary can be downloaded from the run's
-# page, under Artifacts.
+# page, under Artifacts, as is the macOS disk image made from both Mac builds.
 #
 # Pushing a tag that starts with v (git tag v1.0 && git push origin v1.0)
 # also publishes a GitHub release with the binaries attached, at stable
@@ -96,9 +96,62 @@ jobs:
           path: cedit-${{ matrix.name }}.*
           if-no-files-found: error
 
+  # macOS: one disk image for every Mac, holding cedit.app to drag into
+  # Applications. Its program is the two macOS builds above, each tested on
+  # its own processor, joined into one (a universal binary).
+  macos-dmg:
+    needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: cedit-macos-*
+          path: dist
+          merge-multiple: true
+
+      - name: Package
+        run: |
+          for arch in arm64 x86_64; do
+            mkdir $arch
+            tar -xzf dist/cedit-macos-$arch.tar.gz -C $arch
+          done
+          app=dmg/cedit.app/Contents
+          mkdir -p $app/MacOS $app/Resources
+          lipo -create arm64/cedit x86_64/cedit -output $app/MacOS/cedit
+          lipo -info $app/MacOS/cedit
+          cp data/Info.plist $app/
+          cp data/cedit.icns LICENSE $app/Resources/
+          # a release's version from its tag: v1.2 is 1.2
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            for key in CFBundleShortVersionString CFBundleVersion; do
+              plutil -replace $key -string "${GITHUB_REF_NAME#v}" $app/Info.plist
+            done
+          fi
+          plutil -lint $app/Info.plist
+          # Signed ad hoc, by no one, but as a whole: macOS calls an app
+          # whose files changed after its program was signed "damaged"
+          codesign --force --sign - dmg/cedit.app
+          codesign --verify --strict --verbose=2 dmg/cedit.app
+          ln -s /Applications dmg/Applications
+          # hdiutil on GitHub's Macs sometimes finds a resource busy
+          for try in 1 2 3; do
+            hdiutil create -volname cedit -srcfolder dmg -fs HFS+ \
+              -format UDZO -ov cedit-macos.dmg && break
+            sleep 10
+          done
+          hdiutil verify cedit-macos.dmg
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cedit-macos-dmg
+          path: cedit-macos.dmg
+          if-no-files-found: error
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, macos-dmg]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -28,8 +28,9 @@ static const struct {
 };
 
 #ifdef __APPLE__
-/* macOS: the Dock's icon, as cedit isn't an app bundle that could hold one
- * (Windows takes it from cedit.exe, Linux desktops from cedit.desktop).
+/* macOS: the Dock's icon, as the cedit program on its own isn't an app
+ * bundle that could hold one (cedit.app has data/cedit.icns, Windows takes
+ * it from cedit.exe, Linux desktops from cedit.desktop).
  * The icon at 8 screen pixels to its pixel, the Dock's largest. */
 static void set_app_icon(SDL_Window *win)
 {

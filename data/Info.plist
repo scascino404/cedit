@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- cedit.app's: the macOS app the release's disk image holds (see
+     .github/workflows/build.yml), around the same single cedit program.
+     The release sets the version from its tag. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>cedit</string>
+	<key>CFBundleDisplayName</key>
+	<string>cedit</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.scascino404.cedit</string>
+	<key>CFBundleExecutable</key>
+	<string>cedit</string>
+	<key>CFBundleIconFile</key>
+	<string>cedit</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<!-- the window at the display's full resolution, not magnified -->
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- Finder's Open With, and files dropped on the Dock's icon: text,
+	     and files it can't tell are text, such as a Makefile -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Text</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.text</string>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
