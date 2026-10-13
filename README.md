@@ -32,62 +32,17 @@ It borrows from two places:
 
 ## Downloads
 
-Ready-made builds of each release are on the
-[Releases](https://github.com/scascino404/cedit/releases/latest) page:
-
-| File | Runs on |
-|---|---|
-| `cedit-linux-x86_64.tar.gz` | Linux on 64-bit Intel or AMD, with glibc 2.34 or newer (Ubuntu 22.04, Debian 12, Fedora 35, RHEL 9 and later) |
-| `cedit-linux-arm64.tar.gz` | Linux on 64-bit ARM, such as a Raspberry Pi 4 or 5 with a 64-bit system, with glibc 2.34 or newer |
-| `cedit-macos.dmg` | Any Mac, with Apple silicon or Intel, macOS 11 or newer |
-| `cedit-macos-arm64.tar.gz` | The program alone, for a terminal: Macs with Apple silicon (M1 and later), macOS 11 or newer |
-| `cedit-macos-x86_64.tar.gz` | The program alone, for a terminal: Macs with an Intel processor, macOS 11 or newer |
-| `cedit-windows-x64.zip` | Windows 10 and 11, 64-bit |
-
-On a Mac, open `cedit-macos.dmg` and drag cedit to Applications; it is
-then with your other apps, and Finder's **Open With** offers it for text files.
-
-The first time, macOS won't open it, as cedit isn't signed by Apple: on
-macOS 15 and later, click **Done**, then in **System Settings** >
-**Privacy & Security**, click **Open Anyway** next to "cedit was blocked"
-and confirm. On earlier versions, Control-click cedit in Applications,
-choose **Open**, then **Open** again. Either way, it is only once.
-
-The other files hold a single program, with nothing to install. On Linux,
-or from a terminal on macOS, unpack it and run it:
-
-```sh
-tar -xzf cedit-linux-x86_64.tar.gz
-./cedit [file]
-sudo mv cedit /usr/local/bin/     # optional: run it as cedit from anywhere
-```
-
-The Linux files also hold an entry and an icon for the desktop's
-application launcher. To install cedit for yourself with them:
-
-```sh
-install -Dm755 cedit ~/.local/bin/cedit
-install -Dm644 cedit.desktop ~/.local/share/applications/cedit.desktop
-install -Dm644 cedit.svg ~/.local/share/icons/hicolor/scalable/apps/cedit.svg
-```
-
-The launcher runs `cedit`, so `~/.local/bin` has to be on your `PATH`.
-
-On macOS, a program downloaded from a browser is blocked the first time,
-as cedit isn't signed by Apple; `xattr -d com.apple.quarantine cedit`
-allows it. (cedit.app holds the same program, so with it installed,
-`open -a cedit file` opens a file from a terminal.)
-
-On Windows, unpack the zip and double-click `cedit.exe`, or run
-`cedit.exe [file]` from a terminal. If SmartScreen warns of an
-unrecognized app, choose **More info**, then **Run anyway**.
+Ready-made builds for Linux, macOS and Windows, and how to install them,
+are on the [Releases](https://github.com/scascino404/cedit/releases/latest)
+page.
 
 ## Build
 
-### Linux / macOS
+You need a C compiler, CMake 3.27 or newer and Ninja; the build downloads
+SDL2 by itself.
 
-You need a C compiler, CMake 3.27 or newer, Ninja, and on Linux the X11 and
-Wayland development files:
+<details>
+<summary>Packages to install</summary>
 
 | System | Install |
 |---|---|
@@ -95,49 +50,21 @@ Wayland development files:
 | Fedora | `sudo dnf install clang cmake ninja-build libX11-devel libXext-devel libXcursor-devel libXfixes-devel libXi-devel libXrandr-devel libXScrnSaver-devel wayland-devel libxkbcommon-devel mesa-libEGL-devel libdecor-devel dbus-devel ibus-devel` |
 | Arch | `sudo pacman -S base-devel clang cmake ninja libx11 libxext libxcursor libxfixes libxi libxrandr libxss wayland libxkbcommon libglvnd libdecor dbus libibus` |
 | macOS | `xcode-select --install`, then `brew install cmake ninja` |
+| Windows | [Visual Studio](https://visualstudio.microsoft.com/) 2022 or later, with the **Desktop development with C++** workload; run the commands in a **Developer PowerShell for VS** |
 
 Debian 12 and Ubuntu 22.04 ship an older CMake; `pipx install cmake` gets a
 current one.
 
-Then build it, and optionally install it:
+</details>
 
 ```sh
-cmake --preset release            # configure, once (downloads SDL2)
+cmake --preset release            # configure, once
 cmake --build --preset release    # builds build/cedit
 ctest --preset release            # runs the tests
-sudo cmake --install build        # copies it to /usr/local/bin
+sudo cmake --install build        # optional: copies it to /usr/local/bin
 ```
 
-On Linux, installing also adds cedit, with its icon, to the desktop's
-application launcher. To install it for yourself only, without `sudo`, use
-`cmake --install build --prefix ~/.local` (with `~/.local/bin` on your
-`PATH`).
-
-For debugging, use the `debug` preset, or `asan` for AddressSanitizer and
-UBSan, in place of `release`. They build into `build-debug/` and
-`build-asan/`.
-
-The presets build with Ninja, and with clang where it is installed. To use
-gcc, configure with `cmake --preset release -DCMAKE_C_COMPILER=gcc`.
-
-### Windows
-
-You need [Visual Studio](https://visualstudio.microsoft.com/) 2022 or
-later (Community, or just the Build Tools) with the **Desktop development
-with C++** workload. (The build downloads SDL2 by itself.)
-
-Either open the cedit folder in Visual Studio and build, or run these in a
-**Developer PowerShell for VS**:
-
-```powershell
-cmake --preset release            # configure, once (downloads SDL2)
-cmake --build --preset release    # builds build\cedit.exe
-ctest --preset release            # runs the tests
-```
-
-The `debug` and `asan` presets work there too (`asan` without UBSan, which
-Visual C++ lacks). If the configure step warns of a 32-bit build, use the
-**x64 Native Tools Command Prompt for VS** instead.
+The `debug` and `asan` presets build into `build-debug/` and `build-asan/`.
 
 ## Run
 
