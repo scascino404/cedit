@@ -63,6 +63,11 @@ int screen_init(Screen *s, int size, int w, int h)
 
     memset(s, 0, sizeof *s);
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    /* SDL's OpenGL renderer (Linux's) compiles 14 shader programs when it
+     * starts, most for YUV video, which takes about a tenth of the time to
+     * the first frame; OpenGL's fixed functions draw cedit's textures and
+     * rectangles the same */
+    SDL_SetHint(SDL_HINT_RENDER_OPENGL_SHADERS, "0");
 #ifdef __SANITIZE_ADDRESS__
     /* SDL_Quit frees what D-Bus keeps, for LeakSanitizer (SDL's docs say
      * not to in a release build) */
