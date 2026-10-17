@@ -412,6 +412,19 @@ int main(void)
     CHECK(ed.cx == 4);
     opt.spaces = 0;
 
+    /* unindenting leaves no selection, not even an empty one (Shift+Right,
+     * Shift+Left): its anchor would stay where the text moved away from,
+     * and what was typed next deleted into the next line */
+    open_text(&ed, "    foo\nbar\n");
+    ed_set_cursor(&ed, 0, 6, 0);
+    ed_move(&ed, MV_RIGHT, 1);
+    ed_move(&ed, MV_LEFT, 1);
+    ed_tab(&ed, 1, t += 2000);
+    EXPECT(&ed, "foo\nbar\n");
+    CHECK(!ed.sel && ed.cx == 2);
+    type(&ed, "X", &t);
+    EXPECT(&ed, "foXo\nbar\n");
+
     /* overwrite mode */
     open_text(&ed, "abcdef");
     opt.overwrite = 1;

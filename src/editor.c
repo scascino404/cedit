@@ -1031,6 +1031,9 @@ void ed_tab(Editor *ed, int unindent, unsigned long now)
         return;
     }
     if (!had) {
+        /* unindents the cursor's line; an empty selection goes, as its
+         * anchor would stay where the text moves away */
+        ed->sel = 0;
         sy = ey = ed->cy;
         ex = 1;
     }
