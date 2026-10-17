@@ -389,6 +389,24 @@ int main(void)
     CHECK(ed.cy == 0 && ed.cx == 3);
     CHECK(ed_find(&ed, 1) == 2);
 
+    /* a long search text is used whole: cut short, Replace All would
+     * replace what matches the rest, here in both lines */
+    {
+        char text[600], want[600];
+        memset(text, 'a', 300);
+        strcpy(text + 300, "!\n");
+        memset(text + 302, 'a', 260);
+        strcpy(text + 562, "\n");
+        open_text(&ed, text);
+        memset(opt.find, 'a', 300);
+        strcpy(opt.find + 300, "!");
+        strcpy(opt.repl, "X");
+        CHECK(ed_replace_all(&ed) == 1);
+        strcpy(want, "X\n");
+        strcat(want, text + 302);
+        EXPECT(&ed, want);
+    }
+
     /* block indent / unindent */
     open_text(&ed, "a\nb\nc\n");
     ed_set_cursor(&ed, 0, 0, 0);

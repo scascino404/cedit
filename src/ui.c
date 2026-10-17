@@ -28,6 +28,12 @@
 #define FIND_SLICE ((size_t)1024 * 1024)
 #define SAVE_SLICE ((size_t)2 * 1024 * 1024)
 
+/* The Find and Replace fields' text goes into EdOptions whole: cut short,
+ * Replace All would replace what matches the rest */
+#if FIELD_MAX > ED_FIND_MAX
+#error "EdOptions.find and .repl must hold a dialog field's text"
+#endif
+
 /* actions that wait for "save changes?" */
 enum { P_NONE, P_QUIT, P_NEW, P_OPEN, P_OPEN_PATH, P_CLOSE };
 

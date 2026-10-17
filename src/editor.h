@@ -27,6 +27,10 @@ typedef struct WrapRows {
     long n, cap;
 } WrapRows;
 
+/* Room for the search and replacement texts, with their NUL: all that the
+ * dialogs' fields take (FIELD_MAX in dialog.h). */
+#define ED_FIND_MAX 1024
+
 /* Settings and search text shared by all the views. */
 typedef struct EdOptions {
     int overwrite;
@@ -34,8 +38,8 @@ typedef struct EdOptions {
     int tabw;
     int spaces;             /* Tab inserts spaces instead of a tab */
     int wrap;               /* word wrap: long lines go on in more rows */
-    char find[256];
-    char repl[256];
+    char find[ED_FIND_MAX];
+    char repl[ED_FIND_MAX];
     int icase;
 } EdOptions;
 
@@ -184,7 +188,7 @@ void ed_goto(Editor *ed, long line);
  * except by the steps themselves.
  */
 typedef struct EdSearch {
-    char pat[256];          /* opt->find when it started */
+    char pat[ED_FIND_MAX];  /* opt->find when it started */
     size_t plen;
     int icase, backward;
     int pass;               /* 0 from the start on, 1 the rest after
@@ -199,7 +203,7 @@ void ed_find_begin(Editor *ed, EdSearch *s, int backward);
 int ed_find_step(Editor *ed, EdSearch *s, size_t bytes);
 
 typedef struct EdReplace {
-    char pat[256], repl[256];
+    char pat[ED_FIND_MAX], repl[ED_FIND_MAX];
     size_t plen, rlen;
     int icase;
     size_t pos;             /* where the next slice searches from */

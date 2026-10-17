@@ -331,6 +331,27 @@ static void test_replace_all(void)
     CHECK(!ed_modified(ed()));
 }
 
+/* A search text longer than 255 bytes goes from the Find field whole. */
+static void test_long_find(void)
+{
+    char t[16];
+    int i;
+
+    key(SDLK_HOME, KMOD_LCTRL);
+    key(SDLK_f, KMOD_LCTRL);
+    key(SDLK_BACKSPACE, KMOD_LCTRL);        /* the last search's text goes */
+    strcpy(t, "aaaaaaaaaa");
+    for (i = 0; i < 30; i++)
+        text(t);
+    text("!");
+    key(SDLK_RETURN, 0);                    /* Find Next */
+    drain();
+    CHECK(strlen(app.opt.find) == 301 && app.search.plen == 301);
+    CHECK(strncmp(app.msg, "Not found: ", 11) == 0 && !ed()->sel);
+    key(SDLK_ESCAPE, 0);
+    CHECK(app.dlg.kind == DLG_NONE);
+}
+
 /* The saved file is the text with "X" in front. */
 static void check_saved(void)
 {
@@ -441,6 +462,7 @@ int main(void)
 #endif
     test_find();
     test_replace_all();
+    test_long_find();
     test_save();
 
     app_quit(&app);
