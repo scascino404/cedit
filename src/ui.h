@@ -35,6 +35,8 @@ typedef struct App {
                                top of the file menu */
     char overwrite[PATH_LEN];   /* existing file the user agreed to replace */
     int pending;            /* action waiting for "save changes?" */
+    Window *pending_win;    /* the window it is for (the focus may move
+                               while its document saves) */
     char pending_path[PATH_LEN];
 
     char msg[256];          /* message in the focused window's bottom

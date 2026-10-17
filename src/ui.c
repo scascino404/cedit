@@ -734,6 +734,11 @@ static void run_pending(App *a)
     int p = a->pending;
     Window *w;
     a->pending = P_NONE;
+    /* the window the action was asked in, not the one the user went to
+     * while the save ran (no window can close meanwhile: see guard) */
+    if (p != P_QUIT && a->pending_win)
+        focus(a, a->pending_win);
+    a->pending_win = NULL;
     switch (p) {
     case P_QUIT:
         /* asks about each unsaved document in turn, in a window showing it */
@@ -782,6 +787,7 @@ static void guard(App *a, int action, const char *path)
     }
     stop_job(a, 0);
     a->pending = action;
+    a->pending_win = a->win;
     str_copy(a->pending_path, sizeof a->pending_path, path ? path : "");
     if (action == P_QUIT) {
         Window *w;

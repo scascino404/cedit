@@ -92,15 +92,21 @@ static void make_file(void)
         fclose(f);
 }
 
-/* Opens the file, as dropping it on the window does. */
-static void open_file(void)
+/* Opens file p, as dropping it on the window does. */
+static void drop_file(const char *p)
 {
     SDL_Event e;
     memset(&e, 0, sizeof e);
     e.type = SDL_DROPFILE;
-    e.drop.file = SDL_strdup(path);
+    e.drop.file = SDL_strdup(p);
     app_event(&app, &e);
     frame();
+}
+
+/* Opens the test file. */
+static void open_file(void)
+{
+    drop_file(path);
 }
 
 static const char *line(long ln, size_t *len)
@@ -352,6 +358,76 @@ static void test_long_find(void)
     CHECK(app.dlg.kind == DLG_NONE);
 }
 
+/* Writes a small file of text s, into p[size]. */
+static void small_file(char *p, size_t size, const char *s)
+{
+    FILE *f = tmp_file(p, size, "cedit-ui");
+    if (f) {
+        fputs(s, f);
+        fclose(f);
+    }
+}
+
+/* Whether file p holds text s. */
+static int holds(const char *p, const char *s)
+{
+    char l[64] = "";
+    FILE *f = fopen(p, "rb");
+    size_t n = f ? fread(l, 1, sizeof l - 1, f) : 0;
+    if (f)
+        fclose(f);
+    l[n] = 0;
+    return strcmp(l, s) == 0;
+}
+
+/* What waits for "Save changes?" is done in the window it was asked in,
+ * though the focus goes to another one while the file is saved: there it
+ * would throw away that window's changes. */
+static void test_pending(void)
+{
+    char px[512], py[512];
+    Window *w0 = app.win, *wx, *wy;
+
+    small_file(px, sizeof px, "x\n");
+    small_file(py, sizeof py, "y\n");
+    /* windows on file x and file y, both changed, next to the test file */
+    key(SDLK_BACKSLASH, KMOD_LCTRL);
+    wx = app.win;
+    drop_file(px);
+    text("1");
+    key(SDLK_BACKSLASH, KMOD_LCTRL);
+    wy = app.win;
+    drop_file(py);
+    text("2");
+    CHECK(wx != w0 && wy != wx && ed_modified(&wx->ed) && ed_modified(&wy->ed));
+
+    /* New in x's window: save x, and meanwhile go to y's */
+    key(SDLK_F6, KMOD_LSHIFT);
+    CHECK(app.win == wx);
+    key(SDLK_n, KMOD_LCTRL);
+    CHECK(app.dlg.kind != DLG_NONE);        /* "Save changes to ...?" */
+    press(SDLK_y);
+    CHECK(app.save != NULL);
+    key(SDLK_F6, 0);
+    CHECK(app.win == wy);
+    drain();
+    CHECK(holds(px, "1x\n"));
+    CHECK(app.win == wx && wx->ed.doc->path == NULL && !ed_modified(&wx->ed));
+    CHECK(wy->ed.doc->path && strcmp(ed_name(&wy->ed), strrchr(py, '/') + 1) == 0 &&
+          ed_modified(&wy->ed));
+    CHECK(holds(py, "y\n"));
+
+    /* back to the test file's window alone, y's changes dropped */
+    key(SDLK_F6, 0);
+    key(SDLK_w, KMOD_LCTRL);
+    press(SDLK_n);
+    key(SDLK_w, KMOD_LCTRL);
+    CHECK(app.root == w0 && app.win == w0);
+    frame();                                /* it takes the whole width */
+    remove(px);
+    remove(py);
+}
+
 /* The saved file is the text with "X" in front. */
 static void check_saved(void)
 {
@@ -463,6 +539,7 @@ int main(void)
     test_find();
     test_replace_all();
     test_long_find();
+    test_pending();
     test_save();
 
     app_quit(&app);
