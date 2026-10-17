@@ -1,3 +1,22 @@
+## What's new in v1.0.1
+
+This release fixes three bugs that could lose or change text:
+
+- **Unsaved changes in another window could be lost.** New, Open, Close
+  Window and dropping a file on a changed document ask to save it first,
+  then go on once it is saved. If you went to another window while it
+  saved, they went on there: New or Open replaced that window's document,
+  throwing away its changes without asking, and Close Window closed it.
+- **Shift+Tab could leave a selection you didn't make.** After an empty
+  selection (Shift+Right then Shift+Left, or a click with the mouse moved
+  a little), Shift+Tab on an indented line left a selection behind, and
+  the next key typed deleted text up into the next line.
+- **Long searches were cut short.** A search of more than 255 characters
+  was shortened without a word, so Replace All also replaced text that
+  only matched its beginning.
+
+Also, cedit starts about 10 ms sooner on Linux.
+
 ## Downloads
 
 | File | Runs on |
