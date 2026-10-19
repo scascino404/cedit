@@ -1,0 +1,4 @@
+/* cedit.manifest as the programs' manifest resource (1, RT_MANIFEST), for
+ * MinGW: its linker leaves out .manifest sources, which Visual C++'s embeds
+ * itself (see CMakeLists.txt) */
+1 24 "cedit.manifest"

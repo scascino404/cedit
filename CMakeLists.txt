@@ -186,11 +186,14 @@ endif()
 if(WIN32)
     # cedit.exe's icon (on macOS, cedit sets the Dock's itself: screen.c)
     target_sources(cedit PRIVATE data/cedit.rc)
-    # every program takes and gives file names in UTF-8 (see the manifest)
-    target_sources(cedit_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/cedit.manifest)
+    # every program takes and gives file names in UTF-8 (see the manifest).
+    # MinGW's linker doesn't embed .manifest sources: there it's a resource.
     if(msvc_abi)
+        target_sources(cedit_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/cedit.manifest)
         # main, not WinMain (MinGW calls main anyway)
         target_link_options(cedit PRIVATE "LINKER:/ENTRY:mainCRTStartup")
+    else()
+        target_sources(cedit_core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src/manifest.rc)
     endif()
 endif()
 
