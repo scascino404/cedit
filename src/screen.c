@@ -2,6 +2,7 @@
  * screen.c - character grid, dirty-cell rasterizer and SDL presentation.
  */
 #include "screen.h"
+#include "cursor.h"
 #include "logo.h"
 #include "utf8.h"
 #include "util.h"

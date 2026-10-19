@@ -10,7 +10,6 @@
 #define CEDIT_SCREEN_H
 
 #include <SDL.h>
-#include "cursor.h"
 #include "font.h"
 
 /* The 16-color EGA/VGA palette. */
