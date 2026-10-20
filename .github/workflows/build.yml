@@ -96,6 +96,43 @@ jobs:
           path: cedit-${{ matrix.name }}.*
           if-no-files-found: error
 
+  # Windows with MinGW-w64's gcc (MSYS2's UCRT64), built and tested only: the
+  # Windows binary handed out is Visual C++'s, above. MinGW gets the manifest
+  # another way (src/manifest.rc), and no test notices it missing, so every
+  # program that links cedit_core (all but fontsheet) is checked for it.
+  windows-mingw:
+    name: windows-x64-mingw
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          pacboy: gcc:p cmake:p ninja:p
+
+      - name: Configure
+        run: cmake --preset release
+
+      - name: Build
+        run: cmake --build --preset release
+
+      - name: Test
+        run: ctest --preset release
+
+      - name: Check the manifest
+        run: |
+          for exe in build/*.exe; do
+            [ "$exe" = build/fontsheet.exe ] && continue
+            if ! grep -qa 'WindowsSettings">UTF-8<' "$exe"; then
+              echo "$exe has no manifest (no UTF-8 code page)"
+              exit 1
+            fi
+          done
+
   # macOS: one disk image for every Mac, holding cedit.app to drag into
   # Applications. Its program is the two macOS builds above, each tested on
   # its own processor, joined into one (a universal binary).
