@@ -153,17 +153,13 @@ static int holds(const char *path, const char *text)
     return f && strcmp(got, text) == 0;
 }
 
-/* Whether a file can be added to the folder dir. */
-static int can_add(const char *dir)
+/* Whether the file at path can be made (and then removes it). */
+static int can_make(const char *path)
 {
-    char probe[512];
-    FILE *f;
-
-    sprintf(probe, "%s/probe", dir);
-    f = fopen(probe, "wb");
+    FILE *f = fopen(path, "wb");
     if (f) {
         fclose(f);
-        remove(probe);
+        remove(path);
     }
     return f != NULL;
 }
@@ -187,7 +183,7 @@ static void test_replaced(void)
 /* Through a symbolic link: the target is saved, the link stays. */
 static void test_link(void)
 {
-    char path[512], link[512], err[256] = "";
+    char path[512], link[sizeof path + 5], err[256] = "";  /* path".link" */
     FILE *f = tmp_file(path, sizeof path, "cedit-target");
     int r, still;
 
@@ -211,12 +207,18 @@ static void test_link(void)
  * file either), though the file can be written: it keeps its attributes. */
 static void test_in_place(void)
 {
-    char dir[512], path[512], err[256] = "";
+    /* dir"/file.txt", dir"/probe" */
+    char dir[512], path[sizeof dir + 9], probe[sizeof dir + 6], err[256] = "";
     FILE *f;
     int r, ok, kept;
 
+    if (strlen(sys_temp_dir()) + sizeof "/cedit-noadd" > sizeof dir) {
+        CHECK(0, "the temporary folder's path is too long");
+        return;
+    }
     sprintf(dir, "%s/cedit-noadd", sys_temp_dir());
     sprintf(path, "%s/file.txt", dir);
+    sprintf(probe, "%s/probe", dir);
     remove_dir(dir, path);          /* left by a run that broke off */
     sys_mkdir(dir);
     f = fopen(path, "wb");
@@ -230,7 +232,7 @@ static void test_in_place(void)
         remove_dir(dir, path);
         return;
     }
-    if (can_add(dir)) {             /* as root, say */
+    if (can_make(probe)) {          /* as root, say */
         printf("(no in-place test: this account adds files anyway)\n");
         remove_dir(dir, path);
         return;
